@@ -49,7 +49,7 @@ Thumbs.db
 next-env.d.ts
 
 # Hardhat & Blockchain
-artifacts/
+# artifacts/  # COMMENTED OUT - Need ABIs for deployment
 cache/
 typechain-types/
 
