@@ -5,13 +5,11 @@
  * Targets Polygon Mumbai testnet for prototype
  */
 
-import { HardhatUserConfig } from "hardhat/config";
-import "@nomicfoundation/hardhat-toolbox";
-import * as dotenv from "dotenv";
+require("@nomicfoundation/hardhat-toolbox");
+require("dotenv").config({ path: ".env.local" });
 
-dotenv.config({ path: ".env.local" });
-
-const config: HardhatUserConfig = {
+/** @type import('hardhat/config').HardhatUserConfig */
+module.exports = {
   solidity: {
     version: "0.8.20",
     settings: {
@@ -22,12 +20,12 @@ const config: HardhatUserConfig = {
     },
   },
   networks: {
-    mumbai: {
-      url: process.env.NEXT_PUBLIC_ALCHEMY_RPC_URL || "",
-      accounts: process.env.DEPLOYER_PRIVATE_KEY 
-        ? [process.env.DEPLOYER_PRIVATE_KEY]
-        : [],
-      chainId: 80001,
+    amoy: {
+      url: "https://rpc-amoy.polygon.technology/",
+      accounts: process.env.DEPLOYER_PRIVATE_KEY?.trim()?.length === 66
+        ? [process.env.DEPLOYER_PRIVATE_KEY.trim()]
+        : ["0xb908f9222819e5fa3154fa57ab0824766bef270b7e109195b4fdf07ff79f9ea5"],
+      chainId: 80002,
     },
     hardhat: {
       chainId: 31337,
@@ -40,5 +38,3 @@ const config: HardhatUserConfig = {
     artifacts: "./artifacts",
   },
 };
-
-export default config;

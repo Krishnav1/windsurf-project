@@ -9,6 +9,8 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { getTokenBalance, getInvestorDetails } from '@/lib/blockchain/erc3643Service';
+import WalletConnect from '@/components/WalletConnect';
 
 export default function PortfolioPage() {
   const router = useRouter();
@@ -17,6 +19,10 @@ export default function PortfolioPage() {
   const [transactions, setTransactions] = useState<any[]>([]);
   const [summary, setSummary] = useState<any>({});
   const [loading, setLoading] = useState(true);
+  const [erc3643Balance, setErc3643Balance] = useState<any>(null);
+  const [investorInfo, setInvestorInfo] = useState<any>(null);
+  const [investmentLimit, setInvestmentLimit] = useState<any>(null);
+  const [walletAddress, setWalletAddress] = useState<string | null>(null);
 
   useEffect(() => {
     const token = localStorage.getItem('token');
@@ -30,6 +36,27 @@ export default function PortfolioPage() {
     setUser(JSON.parse(userData));
     fetchPortfolio(token);
   }, []);
+
+  const handleWalletConnect = async (address: string) => {
+    setWalletAddress(address);
+    
+    // Fetch ERC3643 balance
+    try {
+      const balance = await getTokenBalance(address);
+      setErc3643Balance(balance);
+      
+      const info = await getInvestorDetails(address);
+      setInvestorInfo(info);
+    } catch (error) {
+      console.error('Error fetching blockchain data:', error);
+    }
+  };
+
+  const handleWalletDisconnect = () => {
+    setWalletAddress(null);
+    setErc3643Balance(null);
+    setInvestorInfo(null);
+  };
 
   const fetchPortfolio = async (token: string) => {
     try {
@@ -87,6 +114,10 @@ export default function PortfolioPage() {
               </Link>
             </div>
             <div className="flex items-center gap-4">
+              <WalletConnect 
+                onConnect={handleWalletConnect}
+                onDisconnect={handleWalletDisconnect}
+              />
               <span className="text-sm text-gray-600">{user?.fullName}</span>
               <button
                 onClick={handleLogout}
@@ -102,6 +133,47 @@ export default function PortfolioPage() {
       {/* Main Content */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <h2 className="text-3xl font-bold text-gray-900 mb-8">My Portfolio</h2>
+
+        {/* Wallet Status Banner */}
+        {walletAddress && erc3643Balance && (
+          <div className="mb-8 bg-gradient-to-r from-emerald-50 to-blue-50 border-2 border-emerald-200 rounded-2xl p-6 shadow-lg">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-lg font-bold text-gray-900 mb-2">🔗 Blockchain Connected</h3>
+                <div className="grid grid-cols-3 gap-6 mt-4">
+                  <div>
+                    <p className="text-xs text-gray-500 mb-1">ERC-3643 Balance</p>
+                    <p className="text-2xl font-bold text-emerald-600">{erc3643Balance.total.toFixed(2)}</p>
+                    <p className="text-xs text-gray-500">Available: {erc3643Balance.available.toFixed(2)}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-500 mb-1">Frozen Tokens</p>
+                    <p className="text-2xl font-bold text-orange-600">{erc3643Balance.frozen.toFixed(2)}</p>
+                  </div>
+                  {investorInfo && (
+                    <div>
+                      <p className="text-xs text-gray-500 mb-1">Investment Limit</p>
+                      <p className="text-2xl font-bold text-blue-600">₹{investorInfo.investmentLimit.toLocaleString()}</p>
+                      <p className="text-xs text-gray-500">Used: ₹{investorInfo.currentInvestment.toLocaleString()}</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+              {investorInfo && (
+                <div className="text-right">
+                  <span className={`inline-block px-4 py-2 rounded-full text-sm font-bold ${
+                    investorInfo.kycStatus === 'approved' ? 'bg-green-100 text-green-800' :
+                    investorInfo.kycStatus === 'pending' ? 'bg-yellow-100 text-yellow-800' :
+                    'bg-red-100 text-red-800'
+                  }`}>
+                    KYC: {investorInfo.kycStatus.toUpperCase()}
+                  </span>
+                  <p className="text-xs text-gray-500 mt-2">Category: {investorInfo.category}</p>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Summary Cards */}
         <div className="grid md:grid-cols-3 gap-6 mb-8">

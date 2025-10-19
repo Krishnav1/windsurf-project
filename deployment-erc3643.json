@@ -1,0 +1,17 @@
+{
+  "network": "polygon-amoy",
+  "chainId": 80002,
+  "timestamp": "2025-10-19T20:41:59.012Z",
+  "contracts": {
+    "identityRegistry": "0xF8B43C3F34932aA3FB24C0Ad80281c387401BD7F",
+    "compliance": "0xfdAbec7940688e7a0a1Aed045bA36BD3ec712203",
+    "token": "0x32d4693EFc9b438DC435f3cF71D6a3e759883759"
+  },
+  "deployer": "0xe100b8793F03Dadb8c8cFa4cFBF2D02F7aF953B1",
+  "tokenInfo": {
+    "name": "TokenPlatform Security Token",
+    "symbol": "TPST",
+    "decimals": 18,
+    "initialSupply": "1000000.0"
+  }
+}

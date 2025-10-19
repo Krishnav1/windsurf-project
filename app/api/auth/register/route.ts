@@ -14,7 +14,7 @@ import { v4 as uuidv4 } from 'uuid';
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { email, password, fullName, mobile, country, role } = body;
+    const { email, password, fullName, mobile, country, role, investorCategory } = body;
 
     // Validate required fields
     if (!email || !password || !fullName) {
@@ -78,6 +78,9 @@ export async function POST(request: NextRequest) {
     // Validate role
     const validRoles = ['investor', 'issuer', 'admin', 'auditor'];
     const userRole = role && validRoles.includes(role) ? role : 'investor';
+    const defaultJurisdiction = (country || 'India').substring(0, 2).toUpperCase();
+    const userInvestorCategory = investorCategory || 'retail';
+    const startingInrBalance = 100000;
 
     // Insert user into database
     const { data: newUser, error: insertError } = await supabaseAdmin
@@ -94,6 +97,9 @@ export async function POST(request: NextRequest) {
         kyc_status: 'pending',
         demo_balance: 100000.00, // Demo balance for testing
         is_active: true,
+        investor_category: userInvestorCategory,
+        jurisdiction: defaultJurisdiction,
+        inr_balance: startingInrBalance,
       })
       .select()
       .single();
@@ -128,6 +134,10 @@ export async function POST(request: NextRequest) {
         role: newUser.role,
         walletAddress: newUser.wallet_address,
         kycStatus: newUser.kyc_status,
+        investorCategory: newUser.investor_category,
+        jurisdiction: newUser.jurisdiction,
+        demoBalance: newUser.demo_balance,
+        inrBalance: newUser.inr_balance,
       },
     }, { status: 201 });
 

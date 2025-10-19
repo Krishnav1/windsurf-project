@@ -6,12 +6,20 @@
  */
 
 import bcrypt from 'bcryptjs';
-import jwt from 'jsonwebtoken';
+import jwt, { JwtPayload } from 'jsonwebtoken';
 import speakeasy from 'speakeasy';
 import QRCode from 'qrcode';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-super-secret-jwt-key-min-32-chars';
 const JWT_EXPIRES_IN = '7d'; // Token expires in 7 days
+
+export type AuthRole = 'investor' | 'issuer' | 'admin' | 'auditor';
+
+export type AuthTokenPayload = JwtPayload & {
+  userId: string;
+  email: string;
+  role: AuthRole;
+};
 
 /**
  * Hash password using bcrypt
@@ -40,7 +48,7 @@ export async function verifyPassword(password: string, hash: string): Promise<bo
  * @param role - User role
  * @returns JWT token string
  */
-export function generateToken(userId: string, email: string, role: string): string {
+export function generateToken(userId: string, email: string, role: AuthRole): string {
   return jwt.sign(
     { userId, email, role },
     JWT_SECRET,
@@ -53,12 +61,31 @@ export function generateToken(userId: string, email: string, role: string): stri
  * @param token - JWT token string
  * @returns Decoded token payload or null if invalid
  */
-export function verifyToken(token: string): any {
+export function verifyToken(token: string): AuthTokenPayload | null {
   try {
-    return jwt.verify(token, JWT_SECRET);
+    return jwt.verify(token, JWT_SECRET) as AuthTokenPayload;
   } catch (error) {
+    if (error instanceof Error) {
+      console.error('Error verifying token:', error.message);
+    }
     return null;
   }
+}
+
+/**
+ * Canonicalize JSON object for consistent string representation
+ * @param obj - JSON object to canonicalize
+ * @returns Canonicalized JSON string
+ */
+export function canonicalJSON<T extends Record<string, unknown>>(obj: T): string {
+  const canonical = Object.keys(obj)
+    .sort()
+    .reduce<Record<string, unknown>>((accumulator, key) => {
+      accumulator[key] = obj[key];
+      return accumulator;
+    }, {});
+
+  return JSON.stringify(canonical);
 }
 
 /**

@@ -5,9 +5,11 @@
  * Manages token minting and on-chain metadata anchoring
  */
 
-import { ethers, Contract } from 'ethers';
+import { ethers, Contract, ContractTransactionResponse } from 'ethers';
 import { getProvider, getWallet } from './config';
 import SecurityTokenABI from '../../artifacts/contracts/SecurityToken.sol/SecurityToken.json';
+import IdentityRegistryABI from '../../artifacts/contracts/IdentityRegistry.sol/IdentityRegistry.json';
+import ComplianceManagerABI from '../../artifacts/contracts/ComplianceManager.sol/ComplianceManager.json';
 
 export interface TokenDeploymentParams {
   name: string;
@@ -19,11 +21,54 @@ export interface TokenDeploymentParams {
   deployerPrivateKey?: string;
 }
 
+export async function registerVerifiedIdentity(
+  params: IdentityRegistrationParams
+): Promise<string> {
+  try {
+    const contract = getIdentityRegistryContract(
+      params.registryAddress,
+      params.operatorPrivateKey
+    );
+    const tx = await contract.registerIdentity(
+      params.walletAddress,
+      params.identityHash,
+      params.kycExpiry
+    );
+    const receipt = await tx.wait();
+    return receipt.hash;
+  } catch (error: any) {
+    throw new Error(`Failed to register identity: ${error.message}`);
+  }
+}
+
+export async function isIdentityVerified(
+  registryAddress: string,
+  walletAddress: string
+): Promise<boolean> {
+  const contract = getIdentityRegistryContract(registryAddress);
+  try {
+    return await contract.isVerified(walletAddress);
+  } catch (error: any) {
+    console.error('Identity verification check failed:', error);
+    return false;
+  }
+}
+
 export interface DeploymentResult {
   contractAddress: string;
   transactionHash: string;
   blockNumber: number;
   tokenId: string;
+  identityRegistryAddress: string;
+  complianceManagerAddress: string;
+}
+
+export interface IdentityRegistrationParams {
+  registryAddress: string;
+  walletAddress: string;
+  identityHash: string; // bytes32 hex string
+  kycExpiry: number; // unix timestamp
+  operatorPrivateKey: string;
 }
 
 /**
@@ -47,18 +92,83 @@ export async function deploySecurityToken(
       );
     }
 
+    // Check for pending transactions
+    const pendingTxCount = await provider.getTransactionCount(wallet.address, 'pending');
+    const minedTxCount = await provider.getTransactionCount(wallet.address, 'latest');
+    
+    if (pendingTxCount > minedTxCount) {
+      console.warn(`Warning: ${pendingTxCount - minedTxCount} pending transaction(s) detected. Waiting 30 seconds...`);
+      // Wait for pending transactions to clear
+      await new Promise(resolve => setTimeout(resolve, 30000));
+    }
+
+    // Get current gas prices and increase by 20% to avoid replacement underpriced
+    const feeData = await provider.getFeeData();
+    const gasOptions = {
+      maxFeePerGas: feeData.maxFeePerGas ? (feeData.maxFeePerGas * 120n) / 100n : undefined,
+      maxPriorityFeePerGas: feeData.maxPriorityFeePerGas ? (feeData.maxPriorityFeePerGas * 120n) / 100n : undefined,
+    };
+    
+    console.log('Gas settings:', {
+      maxFeePerGas: gasOptions.maxFeePerGas?.toString(),
+      maxPriorityFeePerGas: gasOptions.maxPriorityFeePerGas?.toString()
+    });
+
     // Convert total supply to wei (with decimals)
     const totalSupplyWithDecimals = ethers.parseUnits(
       params.totalSupply,
       params.decimals
     );
 
-    // Create contract factory
+    // Create contract factories
+    const IdentityRegistryFactory = new ethers.ContractFactory(
+      IdentityRegistryABI.abi,
+      IdentityRegistryABI.bytecode,
+      wallet
+    );
+
+    const ComplianceManagerFactory = new ethers.ContractFactory(
+      ComplianceManagerABI.abi,
+      ComplianceManagerABI.bytecode,
+      wallet
+    );
+
     const SecurityTokenFactory = new ethers.ContractFactory(
       SecurityTokenABI.abi,
       SecurityTokenABI.bytecode,
       wallet
     );
+
+    console.log('Deploying IdentityRegistry...');
+    const identityRegistry = await IdentityRegistryFactory.deploy(gasOptions);
+    await identityRegistry.waitForDeployment();
+    const identityRegistryAddress = await identityRegistry.getAddress();
+    const identityRegistryTx = identityRegistry.deploymentTransaction();
+    await identityRegistryTx?.wait();
+
+    console.log('IdentityRegistry deployed at', identityRegistryAddress);
+
+    console.log('Deploying ComplianceManager...');
+    const complianceManager = await ComplianceManagerFactory.deploy(identityRegistryAddress, gasOptions);
+    await complianceManager.waitForDeployment();
+    const complianceManagerAddress = await complianceManager.getAddress();
+    const complianceManagerTx = complianceManager.deploymentTransaction();
+    await complianceManagerTx?.wait();
+
+    console.log('ComplianceManager deployed at', complianceManagerAddress);
+
+    console.log('Linking ComplianceManager as registry operator...');
+    const registryWithOperator = identityRegistry as unknown as Contract & {
+      setOperator: (
+        operator: string,
+        active: boolean
+      ) => Promise<ContractTransactionResponse>;
+    };
+    const operatorTx = await registryWithOperator.setOperator(
+      complianceManagerAddress,
+      true
+    );
+    await operatorTx.wait();
 
     console.log('Deploying SecurityToken contract...');
     console.log('Parameters:', {
@@ -68,49 +178,59 @@ export async function deploySecurityToken(
       decimals: params.decimals,
       assetType: params.assetType,
       metadataHash: params.metadataHash,
+      identityRegistry: identityRegistryAddress,
+      complianceManager: complianceManagerAddress,
     });
 
-    // Deploy contract
     const contract = await SecurityTokenFactory.deploy(
       params.name,
       params.symbol,
       totalSupplyWithDecimals,
       params.decimals,
       params.assetType,
-      params.metadataHash
+      params.metadataHash,
+      identityRegistryAddress,
+      complianceManagerAddress,
+      gasOptions
     );
 
-    // Wait for deployment
     await contract.waitForDeployment();
     const contractAddress = await contract.getAddress();
-    
-    // Get deployment transaction
+
     const deploymentTx = contract.deploymentTransaction();
     if (!deploymentTx) {
       throw new Error('Deployment transaction not found');
     }
 
-    // Wait for transaction confirmation
     const receipt = await deploymentTx.wait();
     if (!receipt) {
       throw new Error('Transaction receipt not found');
     }
-
-    console.log('Contract deployed successfully!');
-    console.log('Contract Address:', contractAddress);
-    console.log('Transaction Hash:', receipt.hash);
-    console.log('Block Number:', receipt.blockNumber);
 
     return {
       contractAddress,
       transactionHash: receipt.hash,
       blockNumber: receipt.blockNumber,
       tokenId: `${contractAddress}-${params.symbol}`,
+      identityRegistryAddress,
+      complianceManagerAddress,
     };
   } catch (error: any) {
     console.error('Token deployment error:', error);
     throw new Error(`Failed to deploy token: ${error.message}`);
   }
+}
+
+function getIdentityRegistryContract(
+  registryAddress: string,
+  signerPrivateKey?: string
+): Contract {
+  const provider = getProvider();
+  if (signerPrivateKey) {
+    const wallet = getWallet(signerPrivateKey);
+    return new ethers.Contract(registryAddress, IdentityRegistryABI.abi, wallet);
+  }
+  return new ethers.Contract(registryAddress, IdentityRegistryABI.abi, provider);
 }
 
 /**

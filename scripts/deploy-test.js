@@ -55,6 +55,9 @@ async function main() {
 
   console.log("⏳ Waiting for deployment transaction...");
   await token.waitForDeployment();
+  
+  console.log("⏳ Waiting for 2 block confirmations...");
+  await token.deploymentTransaction().wait(2);
 
   const contractAddress = await token.getAddress();
   const deploymentTx = token.deploymentTransaction();

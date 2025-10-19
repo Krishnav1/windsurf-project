@@ -133,6 +133,15 @@ windsurf-project/
 └── hardhat.config.ts          # Blockchain config
 ```
 
+## 📚 Documentation
+
+- **README.md** Comprehensive project overview
+- **SETUP_GUIDE.md** Step-by-step environment preparation
+- **PROJECT_SUMMARY.md** Executive summary and technical highlights
+- **docs/UserFlowGuide.md** Persona-specific walkthroughs for investors, issuers, admins, and auditors
+- **docs/RegulatorArchitecture.md** Architecture brief for regulators and government stakeholders
+- **docs/ImplementationRoadmap.md** ERC-3643 adoption and enhancement timeline
+
 ## 🔑 User Roles
 
 1. **Investor** - Register, complete KYC, trade tokens

@@ -1,30 +1,90 @@
 /**
  * User Login Page
- * 
+ *
  * Handles user authentication with optional 2FA
  */
 
-'use client';
+"use client";
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 
+type AuthSuccessResponse = {
+  success: true;
+  token: string;
+  user: {
+    id: string;
+    role: 'investor' | 'issuer' | 'admin' | 'auditor';
+    fullName?: string | null;
+    kycStatus?: 'pending' | 'approved' | 'rejected' | null;
+    demoBalance?: number | null;
+    twoFAEnabled?: boolean;
+  };
+};
+
+type AuthErrorResponse = {
+  success?: false;
+  error: string;
+  requires2FA?: boolean;
+};
+
+type StoredUser = {
+  id: string;
+  role: 'investor' | 'issuer' | 'admin' | 'auditor';
+  fullName: string;
+  kycStatus: 'pending' | 'approved' | 'rejected';
+  demoBalance: number;
+};
+
 export default function LoginPage() {
   const router = useRouter();
-  const [formData, setFormData] = useState({
-    email: '',
-    password: '',
-    twoFactorToken: '',
-  });
-  const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [twoFactorToken, setTwoFactorToken] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [requires2FA, setRequires2FA] = useState(false);
+  const [error, setError] = useState('');
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  useEffect(() => {
+    const existingToken = localStorage.getItem('token');
+    const storedUser = localStorage.getItem('user');
+
+    if (!existingToken || !storedUser) {
+      return;
+    }
+
+    try {
+      const parsedUser = JSON.parse(storedUser) as StoredUser;
+      redirectByRole(parsedUser.role);
+    } catch {
+      localStorage.removeItem('token');
+      localStorage.removeItem('user');
+    }
+  }, [router]);
+
+  const redirectByRole = (role: StoredUser['role']) => {
+    if (role === 'admin') {
+      router.push('/admin/dashboard');
+    } else if (role === 'issuer') {
+      router.push('/issuer/dashboard');
+    } else {
+      router.push('/dashboard');
+    }
+  };
+
+  const normalizeUser = (user: AuthSuccessResponse['user']): StoredUser => ({
+    id: user.id,
+    role: user.role,
+    fullName: user.fullName ?? 'User',
+    kycStatus: user.kycStatus ?? 'pending',
+    demoBalance: user.demoBalance ?? 0,
+  });
+
+  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setIsSubmitting(true);
     setError('');
-    setLoading(true);
 
     try {
       const response = await fetch('/api/auth/login', {
@@ -33,70 +93,69 @@ export default function LoginPage() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          email: formData.email,
-          password: formData.password,
-          twoFactorToken: formData.twoFactorToken || undefined,
+          email,
+          password,
+          twoFactorToken: requires2FA ? twoFactorToken : undefined,
         }),
       });
 
-      const data = await response.json();
+      const result: AuthSuccessResponse | AuthErrorResponse = await response.json();
 
       if (!response.ok) {
-        if (data.requires2FA) {
+        const errorResponse = result as AuthErrorResponse;
+
+        if (errorResponse.requires2FA) {
           setRequires2FA(true);
-          setError('Please enter your 2FA code');
+          setError('Enter the 2FA code from your authenticator app.');
           return;
         }
-        throw new Error(data.error || 'Login failed');
+
+        setError(errorResponse.error || 'Login failed');
+        return;
       }
 
-      // Store token and user data
-      localStorage.setItem('token', data.token);
-      localStorage.setItem('user', JSON.stringify(data.user));
+      const successResponse = result as AuthSuccessResponse;
+      const normalizedUser = normalizeUser(successResponse.user);
+      localStorage.setItem('token', successResponse.token);
+      localStorage.setItem('user', JSON.stringify(normalizedUser));
 
-      // Redirect based on role
-      if (data.user.role === 'admin') {
-        router.push('/admin/dashboard');
-      } else if (data.user.role === 'issuer') {
-        router.push('/issuer/dashboard');
-      } else {
-        router.push('/dashboard');
-      }
-    } catch (err: any) {
-      setError(err.message);
+      redirectByRole(normalizedUser.role);
+    } catch (submitError) {
+      const message = submitError instanceof Error ? submitError.message : 'Login failed';
+      setError(message);
     } finally {
-      setLoading(false);
+      setIsSubmitting(false);
     }
   };
 
   return (
-    <div className="min-h-screen bg-[#F4F7FB] flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-md w-full space-y-8">
-        {/* Header */}
-        <div>
-          <Link href="/" className="flex justify-center">
-            <h1 className="text-3xl font-bold text-[#0B67FF]">TokenPlatform</h1>
+    <div className="relative min-h-screen overflow-hidden px-4 py-12 sm:px-6 lg:px-8">
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(37,99,235,0.18),_transparent_60%)]" />
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_bottom,_rgba(14,165,233,0.12),_transparent_55%)]" />
+      <div className="relative z-10 mx-auto w-full max-w-lg space-y-8">
+        <div className="glass-panel px-8 py-10 text-center shadow-xl">
+          <Link href="/" className="inline-flex items-center justify-center gap-2">
+            <span className="pill badge-soft">Prototype</span>
+            <h1 className="text-3xl font-bold text-[var(--heading-color)]">TokenPlatform</h1>
           </Link>
-          <h2 className="mt-6 text-center text-3xl font-bold text-gray-900">
-            Sign in to your account
+          <h2 className="mt-6 text-3xl font-semibold text-[var(--heading-color)]">
+            Welcome back
           </h2>
-          <p className="mt-2 text-center text-sm text-gray-600">
-            Access your tokenization dashboard
+          <p className="mt-2 text-sm text-[var(--muted-text)]">
+            Sign in with your sandbox credentials to continue.
           </p>
         </div>
 
-        {/* Login Form */}
-        <form className="mt-8 space-y-6 bg-white p-8 rounded-lg shadow" onSubmit={handleSubmit}>
+        <form className="glass-panel space-y-6 px-8 py-10" onSubmit={handleSubmit}>
           {error && (
-            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
+            <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
               {error}
             </div>
           )}
 
           <div className="space-y-4">
-            {/* Email */}
             <div>
-              <label htmlFor="email" className="block text-sm font-medium text-gray-700">
+              <label htmlFor="email" className="block text-sm font-medium text-[var(--muted-text)]">
                 Email Address
               </label>
               <input
@@ -104,16 +163,14 @@ export default function LoginPage() {
                 name="email"
                 type="email"
                 required
-                value={formData.email}
-                onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-[#0B67FF] focus:border-[#0B67FF]"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                className="mt-2 block w-full rounded-lg border border-[var(--border-subtle)] bg-white/90 px-3 py-3 text-[var(--foreground)] shadow-sm transition focus:border-[var(--primary-color)] focus:outline-none focus:ring-2 focus:ring-[var(--primary-surface)]"
                 placeholder="you@example.com"
               />
             </div>
-
-            {/* Password */}
             <div>
-              <label htmlFor="password" className="block text-sm font-medium text-gray-700">
+              <label htmlFor="password" className="block text-sm font-medium text-[var(--muted-text)]">
                 Password
               </label>
               <input
@@ -121,63 +178,59 @@ export default function LoginPage() {
                 name="password"
                 type="password"
                 required
-                value={formData.password}
-                onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-[#0B67FF] focus:border-[#0B67FF]"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                className="mt-2 block w-full rounded-lg border border-[var(--border-subtle)] bg-white/90 px-3 py-3 text-[var(--foreground)] shadow-sm transition focus:border-[var(--primary-color)] focus:outline-none focus:ring-2 focus:ring-[var(--primary-surface)]"
                 placeholder="••••••••"
               />
             </div>
-
-            {/* 2FA Token (conditional) */}
             {requires2FA && (
               <div>
-                <label htmlFor="twoFactorToken" className="block text-sm font-medium text-gray-700">
+                <label htmlFor="twoFactorToken" className="block text-sm font-medium text-[var(--muted-text)]">
                   2FA Code
                 </label>
                 <input
                   id="twoFactorToken"
                   name="twoFactorToken"
                   type="text"
-                  value={formData.twoFactorToken}
-                  onChange={(e) => setFormData({ ...formData, twoFactorToken: e.target.value })}
-                  className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-[#0B67FF] focus:border-[#0B67FF]"
-                  placeholder="123456"
+                  inputMode="numeric"
+                  pattern="[0-9]{6}"
                   maxLength={6}
+                  value={twoFactorToken}
+                  onChange={(event) => setTwoFactorToken(event.target.value)}
+                  className="mt-2 block w-full rounded-lg border border-[var(--border-subtle)] bg-white/90 px-3 py-3 text-[var(--foreground)] shadow-sm transition focus:border-[var(--primary-color)] focus:outline-none focus:ring-2 focus:ring-[var(--primary-surface)]"
+                  placeholder="123456"
+                  aria-describedby="twoFactorHelp"
                 />
-                <p className="mt-1 text-xs text-gray-500">
-                  Enter the 6-digit code from your authenticator app
+                <p id="twoFactorHelp" className="mt-2 text-xs text-[var(--muted-text)]">
+                  Enter the 6-digit code from your authenticator app.
                 </p>
               </div>
             )}
           </div>
 
-          {/* Submit Button */}
           <div>
             <button
               type="submit"
-              disabled={loading}
-              className="w-full flex justify-center py-3 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-[#0B67FF] hover:bg-[#2D9CDB] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#0B67FF] disabled:opacity-50"
+              disabled={isSubmitting}
+              className="button-primary w-full justify-center text-sm disabled:opacity-60"
             >
-              {loading ? 'Signing in...' : 'Sign in'}
+              {isSubmitting ? 'Signing in…' : 'Sign in'}
             </button>
           </div>
 
-          {/* Register Link */}
           <div className="text-center">
-            <p className="text-sm text-gray-600">
-              Don't have an account?{' '}
-              <Link href="/auth/register" className="font-medium text-[#0B67FF] hover:text-[#2D9CDB]">
+            <p className="text-sm text-[var(--muted-text)]">
+              Don&apos;t have an account?{' '}
+              <Link href="/auth/register" className="font-medium text-[var(--primary-color)] hover:text-[var(--primary-color-hover)]">
                 Create account
               </Link>
             </p>
           </div>
         </form>
 
-        {/* Disclaimer */}
         <div className="text-center">
-          <p className="text-xs text-gray-500">
-            ⚠️ PROTOTYPE - Test Environment Only
-          </p>
+          <p className="text-xs text-[var(--muted-text)]">⚠️ PROTOTYPE • Test Environment Only</p>
         </div>
       </div>
     </div>

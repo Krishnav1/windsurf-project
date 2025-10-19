@@ -48,6 +48,10 @@ export type User = {
   two_fa_enabled: boolean;
   demo_balance: number;
   is_active: boolean;
+  investor_category?: string;
+  jurisdiction?: string;
+  kyc_verified_at?: string | null;
+  inr_balance: number;
   created_at: string;
   updated_at: string;
 };
@@ -67,6 +71,8 @@ export type Token = {
   contract_address?: string;
   token_id?: string;
   mint_tx_hash?: string;
+  identity_registry_address?: string;
+  compliance_manager_address?: string;
   status: 'pending' | 'approved' | 'rejected' | 'active' | 'frozen';
   is_frozen: boolean;
   created_at: string;
@@ -121,5 +127,19 @@ export type AuditLog = {
   ip_address?: string;
   details?: any;
   severity: 'info' | 'warning' | 'critical';
+  created_at: string;
+};
+
+export type InrLedgerEntry = {
+  id: string;
+  user_id: string;
+  token_id?: string | null;
+  order_id?: string | null;
+  delta: number;
+  balance_after: number;
+  reference_type?: string | null;
+  reference_id?: string | null;
+  note?: string | null;
+  metadata?: Record<string, unknown> | null;
   created_at: string;
 };

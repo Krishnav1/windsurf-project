@@ -9,10 +9,10 @@ import { ethers } from 'ethers';
 
 // Network configuration
 export const CHAIN_CONFIG = {
-  chainId: 80001, // Polygon Mumbai testnet
-  name: 'Polygon Mumbai',
-  rpcUrl: process.env.NEXT_PUBLIC_ALCHEMY_RPC_URL || '',
-  blockExplorer: 'https://mumbai.polygonscan.com',
+  chainId: 80002, // Polygon Amoy testnet
+  name: 'Polygon Amoy',
+  rpcUrl: process.env.NEXT_PUBLIC_ALCHEMY_RPC_URL || 'https://rpc-amoy.polygon.technology/',
+  blockExplorer: 'https://amoy.polygonscan.com',
   nativeCurrency: {
     name: 'MATIC',
     symbol: 'MATIC',

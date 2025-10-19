@@ -168,7 +168,7 @@ export async function POST(request: NextRequest) {
         valuation_report_hash: valuationReportHash || null,
         metadata_hash: metadataHash,
         status: 'pending', // Requires admin approval
-        chain_id: 80001, // Polygon Mumbai
+        chain_id: 80002, // Polygon Amoy
       })
       .select()
       .single();

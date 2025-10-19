@@ -8,7 +8,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/client';
 import { verifyToken } from '@/lib/utils/auth';
-import { deploySecurityToken } from '@/lib/blockchain/tokenFactory';
+import { deploySecurityToken, registerVerifiedIdentity } from '@/lib/blockchain/tokenFactory';
+import { computeIdentityHash } from '@/lib/utils/hash';
 
 export async function POST(request: NextRequest) {
   try {
@@ -134,15 +135,17 @@ export async function POST(request: NextRequest) {
     try {
       console.log('Deploying token to blockchain...');
       
-      // Get admin wallet private key for deployment
-      const deployerPrivateKey = user.wallet_private_key_encrypted;
+      // Use environment deployer private key for deployment
+      const deployerPrivateKey = process.env.DEPLOYER_PRIVATE_KEY;
       
       if (!deployerPrivateKey) {
         return NextResponse.json(
-          { error: 'Admin wallet not configured for deployment' },
+          { error: 'Deployer wallet not configured. Set DEPLOYER_PRIVATE_KEY in environment.' },
           { status: 500 }
         );
       }
+
+      const identityOperatorKey = process.env.IDENTITY_OPERATOR_PRIVATE_KEY || deployerPrivateKey;
 
       // Deploy token contract
       const deployment = await deploySecurityToken({
@@ -166,6 +169,8 @@ export async function POST(request: NextRequest) {
           mint_timestamp: new Date().toISOString(),
           approved_by: user.id,
           approved_at: new Date().toISOString(),
+          identity_registry_address: deployment.identityRegistryAddress,
+          compliance_manager_address: deployment.complianceManagerAddress,
         })
         .eq('id', tokenId);
 
@@ -175,6 +180,64 @@ export async function POST(request: NextRequest) {
           { error: 'Token deployed but failed to update database' },
           { status: 500 }
         );
+      }
+
+      // Register issuer identity in the new registry
+      const { data: issuer } = await supabaseAdmin
+        .from('users')
+        .select('id, wallet_address, email, full_name, government_id_number, government_id_type')
+        .eq('id', tokenData.issuer_id)
+        .single();
+
+      if (issuer?.wallet_address && identityOperatorKey) {
+        const issuerIdentity = {
+          issuerId: issuer.id,
+          email: issuer.email,
+          fullName: issuer.full_name,
+          governmentIdNumber: issuer.government_id_number,
+          governmentIdType: issuer.government_id_type,
+        };
+
+        try {
+          const identityHash = computeIdentityHash(issuerIdentity);
+          const expiry = Math.floor(Date.now() / 1000) + 365 * 24 * 60 * 60;
+          const identityTxHash = await registerVerifiedIdentity({
+            registryAddress: deployment.identityRegistryAddress,
+            walletAddress: issuer.wallet_address,
+            identityHash,
+            kycExpiry: expiry,
+            operatorPrivateKey: identityOperatorKey,
+          });
+
+          await supabaseAdmin.from('audit_logs').insert({
+            user_id: user.id,
+            action: 'issuer_identity_registered',
+            resource_type: 'token',
+            resource_id: tokenId,
+            ip_address: request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip'),
+            details: {
+              issuerWallet: issuer.wallet_address,
+              identityRegistry: deployment.identityRegistryAddress,
+              transactionHash: identityTxHash,
+            },
+            severity: 'info',
+          });
+        } catch (identityError: any) {
+          console.error('Issuer identity registration failed:', identityError);
+          await supabaseAdmin.from('audit_logs').insert({
+            user_id: user.id,
+            action: 'issuer_identity_registration_failed',
+            resource_type: 'token',
+            resource_id: tokenId,
+            ip_address: request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip'),
+            details: {
+              issuerWallet: issuer.wallet_address,
+              identityRegistry: deployment.identityRegistryAddress,
+              error: identityError?.message ?? 'unknown_error',
+            },
+            severity: 'warning',
+          });
+        }
       }
 
       // Create transaction record

@@ -32,15 +32,15 @@ export function sha256Buffer(buffer: Buffer): string {
  * @param obj - Object to canonicalize
  * @returns Canonical JSON string
  */
-export function canonicalJSON(obj: any): string {
+export function canonicalJSON<T extends Record<string, unknown>>(obj: T): string {
   // Sort keys alphabetically for consistent ordering
   const sortedKeys = Object.keys(obj).sort();
-  const canonical: any = {};
-  
-  sortedKeys.forEach(key => {
+  const canonical: Record<string, unknown> = {};
+
+  sortedKeys.forEach((key) => {
     canonical[key] = obj[key];
   });
-  
+
   return JSON.stringify(canonical);
 }
 
@@ -63,6 +63,15 @@ export function computeMetadataHash(metadata: {
 }): string {
   const canonical = canonicalJSON(metadata);
   return sha256(canonical);
+}
+
+/**
+ * Compute deterministic identity hash compatible with on-chain bytes32 requirements
+ */
+export function computeIdentityHash(identity: Record<string, unknown>): string {
+  const canonical = canonicalJSON(identity);
+  const digest = sha256(canonical);
+  return `0x${digest}`;
 }
 
 /**
