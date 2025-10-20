@@ -59,6 +59,20 @@ contract ERC3643Token is IERC3643 {
     }
     AssetMetadata private _assetMetadata;
     
+    // IFSCA/SEBI Compliance: Investor limits
+    uint256 private _maxInvestors = 200; // SEBI limit for private placement
+    uint256 private _currentInvestorCount;
+    mapping(address => bool) private _isInvestor;
+    
+    // Minimum investment amount (in token units)
+    uint256 private _minInvestmentAmount;
+    
+    // Events for compliance
+    event InvestorAdded(address indexed investor, uint256 totalInvestors);
+    event InvestorRemoved(address indexed investor, uint256 totalInvestors);
+    event MaxInvestorsUpdated(uint256 newLimit);
+    event MinInvestmentUpdated(uint256 newAmount);
+    
     modifier onlyOwner() {
         require(msg.sender == _owner, "ERC3643: caller is not the owner");
         _;
@@ -236,8 +250,23 @@ contract ERC3643Token is IERC3643 {
         }
     }
     
-    // Compliance Check
+    // Compliance Check with investor limit enforcement
     function canTransfer(address from, address to, uint256 amount) public view override returns (bool) {
+        // Check investor limit (IFSCA/SEBI compliance)
+        if (_balances[to] == 0 && !_isInvestor[to] && to != address(0)) {
+            // New investor - check if we've reached the limit
+            if (_currentInvestorCount >= _maxInvestors) {
+                return false; // Cannot add more investors
+            }
+        }
+        
+        // Check minimum investment amount
+        if (_minInvestmentAmount > 0 && _balances[to] == 0) {
+            if (amount < _minInvestmentAmount) {
+                return false; // First investment must meet minimum
+            }
+        }
+        
         // Check if addresses are frozen
         if (_frozen[from] || _frozen[to]) {
             return false;
@@ -300,11 +329,47 @@ contract ERC3643Token is IERC3643 {
         return _lockInExpiry[addr];
     }
     
+    // IFSCA Compliance: Admin functions
+    function setMaxInvestors(uint256 newLimit) external onlyOwner {
+        require(newLimit >= _currentInvestorCount, "ERC3643: cannot set limit below current count");
+        _maxInvestors = newLimit;
+        emit MaxInvestorsUpdated(newLimit);
+    }
+    
+    function setMinInvestmentAmount(uint256 newAmount) external onlyOwner {
+        _minInvestmentAmount = newAmount;
+        emit MinInvestmentUpdated(newAmount);
+    }
+    
+    function getInvestorCount() external view returns (uint256) {
+        return _currentInvestorCount;
+    }
+    
+    function getMaxInvestors() external view returns (uint256) {
+        return _maxInvestors;
+    }
+    
+    function getMinInvestmentAmount() external view returns (uint256) {
+        return _minInvestmentAmount;
+    }
+    
+    function isInvestor(address addr) external view returns (bool) {
+        return _isInvestor[addr];
+    }
+    
     // Internal Functions
     function _transfer(address from, address to, uint256 amount) internal {
         require(from != address(0), "ERC3643: transfer from zero address");
         require(to != address(0), "ERC3643: transfer to zero address");
         require(_balances[from] >= amount, "ERC3643: insufficient balance");
+        
+        // Track new investors
+        bool wasInvestor = _isInvestor[to];
+        if (_balances[to] == 0 && !wasInvestor && to != address(0)) {
+            _isInvestor[to] = true;
+            _currentInvestorCount++;
+            emit InvestorAdded(to, _currentInvestorCount);
+        }
         
         // If issuer is transferring (primary market), set lock-in for recipient
         if (from == _issuer && _defaultLockInPeriod > 0) {

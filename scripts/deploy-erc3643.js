@@ -30,22 +30,24 @@ async function main() {
   // Step 3: Deploy ERC-3643 Token
   console.log("\n📋 Step 3: Deploying ERC-3643 Token...");
   const ERC3643Token = await ethers.getContractFactory("ERC3643Token");
+  const initialSupply = ethers.parseEther("1000000"); // 1M tokens
+  const lockInPeriod = 365 * 24 * 60 * 60; // 1 year in seconds
+  
   const token = await ERC3643Token.deploy(
-    "TokenPlatform Security Token", // name
-    "TPST",                         // symbol
-    await identityRegistry.getAddress(),       // identity registry
-    await compliance.getAddress()              // compliance module
+    "TokenPlatform Security Token",           // name
+    "TPST",                                   // symbol
+    await identityRegistry.getAddress(),      // identity registry
+    await compliance.getAddress(),            // compliance module
+    deployer.address,                         // issuer (deployer)
+    initialSupply,                            // initial supply
+    lockInPeriod                              // lock-in period
   );
   await token.waitForDeployment();
   console.log("✅ ERC3643Token deployed to:", await token.getAddress());
 
   // Step 4: Configure contracts
   console.log("\n📋 Step 4: Configuring contracts...");
-  
-  // Mint initial supply (for testing)
-  const initialSupply = ethers.parseEther("1000000"); // 1M tokens
-  await token.mint(deployer.address, initialSupply);
-  console.log("✅ Minted initial supply:", ethers.formatEther(initialSupply), "tokens");
+  console.log("✅ Initial supply minted to issuer:", ethers.formatEther(initialSupply), "tokens");
 
   // Step 5: Save deployment info
   console.log("\n📋 Step 5: Saving deployment information...");

@@ -14,6 +14,15 @@ import { supabaseAdmin } from '@/lib/supabase/client';
 import { verifyToken } from '@/lib/utils/auth';
 
 export async function POST(request: NextRequest) {
+  // Verify authentication even for deprecated endpoint
+  const authHeader = request.headers.get('authorization');
+  if (!authHeader) {
+    return NextResponse.json(
+      { error: 'Authorization header required' },
+      { status: 401 }
+    );
+  }
+
   // Return deprecation warning
   return NextResponse.json(
     { 
@@ -24,7 +33,7 @@ export async function POST(request: NextRequest) {
     },
     { status: 410 } // 410 Gone - indicates deprecated/removed resource
   );
-
+}
   /* DEPRECATED CODE - Kept for reference
   try {
     // Verify authentication

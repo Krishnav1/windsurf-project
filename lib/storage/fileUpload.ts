@@ -6,6 +6,8 @@
 import { supabaseAdmin } from '@/lib/supabase/client';
 import { EncryptionService } from '@/lib/security/encryption';
 import { DocumentIntegrityService } from '@/lib/security/documentIntegrity';
+import { DocumentEncryptionService } from '@/lib/security/documentEncryption';
+import { PinataService } from '@/lib/ipfs/pinataService';
 import { uploadWithPublicUrl } from '@/lib/storage/storageService';
 import { logError } from '@/lib/utils/errorHandler';
 import { processDocumentWithRetry } from '@/lib/blockchain/retryService';
@@ -16,12 +18,14 @@ export interface UploadResult {
   fileName: string;
   fileSize: number;
   documentId: string;
+  ipfsHash?: string;
+  ipfsUrl?: string;
 }
 
 export class FileUploadService {
   
   /**
-   * Upload KYC document
+   * Upload KYC document with encryption + IPFS (IFSCA Compliant)
    */
   static async uploadKYCDocument(
     file: File,
@@ -32,50 +36,96 @@ export class FileUploadService {
     // Validate file
     this.validateFile(file);
     
-    // Generate unique filename with proper extension handling
-    const lastDotIndex = file.name.lastIndexOf('.');
-    const fileExt = lastDotIndex > 0 ? file.name.substring(lastDotIndex + 1) : '';
-    const uniqueId = crypto.randomUUID();
-    const fileName = fileExt
-      ? `${userId}/${documentType}_${uniqueId}.${fileExt}`
-      : `${userId}/${documentType}_${uniqueId}`;
-    
-    // Convert to buffer for hashing
+    // Convert to buffer
     const arrayBuffer = await file.arrayBuffer();
     const fileBuffer = Buffer.from(arrayBuffer);
     
-    // Generate hash before upload
-    const fileHash = EncryptionService.generateHash(fileBuffer);
+    // Generate hash of original file (before encryption)
+    const fileHash = DocumentEncryptionService.generateHash(fileBuffer);
     
-    // Upload to Supabase Storage and get public URL with error handling
-    let publicUrl: string;
-    let filePath: string;
+    console.log(`[KYC Upload] Step 1: File validated - ${file.name} (${file.size} bytes)`);
+    
+    // STEP 1: Encrypt document with AES-256-GCM
+    let encryptionResult;
+    try {
+      encryptionResult = DocumentEncryptionService.encryptDocument(fileBuffer);
+      console.log('[KYC Upload] Step 2: Document encrypted successfully');
+    } catch (error) {
+      logError('Document Encryption Failed', error as Error, { userId, documentType });
+      throw new Error('Failed to encrypt document');
+    }
+    
+    // STEP 2: Upload encrypted document to IPFS via Pinata
+    let ipfsResult;
+    try {
+      ipfsResult = await PinataService.uploadEncryptedDocument(
+        encryptionResult.encrypted,
+        userId,
+        documentType,
+        file.name
+      );
+      console.log('[KYC Upload] Step 3: Uploaded to IPFS:', ipfsResult.ipfsHash);
+    } catch (error) {
+      logError('IPFS Upload Failed', error as Error, { userId, documentType });
+      throw new Error('Failed to upload to IPFS');
+    }
+    
+    // STEP 3: Also upload to Supabase Storage as backup (encrypted)
+    const uniqueId = crypto.randomUUID();
+    const lastDotIndex = file.name.lastIndexOf('.');
+    const fileExt = lastDotIndex > 0 ? file.name.substring(lastDotIndex + 1) : '';
+    const fileName = fileExt
+      ? `${userId}/${documentType}_${uniqueId}.enc.${fileExt}`
+      : `${userId}/${documentType}_${uniqueId}.enc`;
+    
+    let publicUrl: string = '';
+    let filePath: string = '';
     
     try {
+      // Create a File object from encrypted buffer
+      const encryptedFile = new File(
+        [encryptionResult.encrypted],
+        `${file.name}.encrypted`,
+        { type: 'application/octet-stream' }
+      );
+      
       const uploadResult = await uploadWithPublicUrl(
         'kyc-documents',
         fileName,
-        file,
+        encryptedFile,
         { cacheControl: '3600', upsert: false }
       );
       publicUrl = uploadResult.publicUrl;
       filePath = uploadResult.filePath;
+      console.log('[KYC Upload] Step 4: Backup uploaded to Supabase Storage');
     } catch (uploadError) {
-      throw new Error(`File upload failed: ${(uploadError as Error).message}`);
+      // Non-critical - IPFS is primary storage
+      logError('Supabase Backup Upload Failed', uploadError as Error, { userId, documentType });
+      console.warn('[KYC Upload] Supabase backup failed, continuing with IPFS only');
     }
     
-    // Create database record with file_path for easier deletion
+    // STEP 4: Create database record with encryption metadata
+    if (!supabaseAdmin) {
+      throw new Error('Database connection not available');
+    }
+    
     const { data: docRecord, error: dbError } = await supabaseAdmin
       .from('kyc_documents')
       .insert({
         user_id: userId,
         document_type: documentType,
-        file_url: publicUrl,
+        file_url: publicUrl || ipfsResult.pinataUrl, // Use IPFS URL if Supabase failed
         file_path: filePath,
         file_name: file.name,
         file_size: file.size,
         file_type: file.type,
         file_hash: fileHash,
+        ipfs_hash: ipfsResult.ipfsHash,
+        ipfs_url: ipfsResult.ipfsUrl,
+        encryption_iv: encryptionResult.iv,
+        encryption_auth_tag: encryptionResult.authTag,
+        encryption_salt: encryptionResult.salt,
+        encrypted: true,
         status: 'pending',
         uploaded_at: new Date().toISOString()
       })
@@ -83,40 +133,56 @@ export class FileUploadService {
       .single();
     
     if (dbError) {
-      // Rollback: Delete uploaded file to prevent orphaned files
+      // Rollback: Delete from IPFS and Supabase
       try {
-        await supabaseAdmin.storage
-          .from('kyc-documents')
-          .remove([filePath]);
+        await PinataService.unpinFile(ipfsResult.ipfsHash);
+        if (filePath) {
+          await supabaseAdmin.storage
+            .from('kyc-documents')
+            .remove([filePath]);
+        }
       } catch (cleanupError) {
-        logError('File Cleanup Failed', cleanupError as Error, { filePath, userId });
+        logError('Cleanup Failed', cleanupError as Error, { userId, documentType });
       }
       throw new Error(`Database error: ${dbError.message}`);
     }
     
-    // Queue for blockchain storage with retry mechanism
+    console.log('[KYC Upload] Step 5: Database record created:', docRecord.id);
+    
+    // STEP 5: Log to audit trail
     try {
-      await processDocumentWithRetry(
-        () => DocumentIntegrityService.processDocument(fileBuffer, docRecord.id, userId),
-        docRecord.id,
-        userId,
-        { maxRetries: 3, initialDelay: 1000 }
-      );
-    } catch (error) {
-      // Log error but don't fail the upload - document is already in DB
-      logError('Blockchain Processing Failed', error as Error, { 
-        documentId: docRecord.id, 
-        userId,
-        note: 'Document saved but blockchain storage failed after retries'
-      });
+      await supabaseAdmin
+        .from('audit_logs_enhanced')
+        .insert({
+          user_id: userId,
+          action: 'kyc_document_uploaded_encrypted',
+          resource_type: 'kyc_documents',
+          resource_id: docRecord.id,
+          details: {
+            documentType,
+            fileName: file.name,
+            fileSize: file.size,
+            ipfsHash: ipfsResult.ipfsHash,
+            encrypted: true,
+            storage: 'ipfs+supabase'
+          },
+          severity: 'info',
+          created_at: new Date().toISOString()
+        });
+    } catch (auditError) {
+      logError('Audit Log Failed', auditError as Error, { userId, documentType });
     }
     
+    console.log('[KYC Upload] ✅ Complete - Document encrypted and stored on IPFS');
+    
     return {
-      fileUrl: publicUrl,
+      fileUrl: ipfsResult.pinataUrl,
       fileHash,
       fileName: file.name,
       fileSize: file.size,
-      documentId: docRecord.id
+      documentId: docRecord.id,
+      ipfsHash: ipfsResult.ipfsHash,
+      ipfsUrl: ipfsResult.ipfsUrl
     };
   }
   

@@ -8,6 +8,7 @@ import { supabaseAdmin } from '@/lib/supabase/client';
 import { verifyToken } from '@/lib/utils/auth';
 import { EncryptionService } from '@/lib/security/encryption';
 import { updateUserKycStatus } from '@/lib/services/kycStatusService';
+import { KYCRegistrationService } from '@/lib/blockchain/kycRegistration';
 import { sanitizeError, logError } from '@/lib/utils/errorHandler';
 
 export async function POST(request: NextRequest) {
@@ -135,6 +136,68 @@ export async function POST(request: NextRequest) {
     // Update user's overall KYC status using centralized service
     const userKycStatus = await updateUserKycStatus(document.user_id);
 
+    // BLOCKCHAIN REGISTRATION: If all documents approved, register on-chain
+    let blockchainTxHash = null;
+    if (action === 'approve' && userKycStatus === 'approved') {
+      try {
+        const user = document.users;
+        
+        // Check if user has wallet address
+        if (user?.wallet_address) {
+          console.log('[Blockchain] Registering KYC on-chain for user:', user.email);
+          
+          // Get IPFS hash from document
+          const ipfsHash = document.ipfs_hash || 'default-hash';
+          
+          // Set KYC expiry to 1 year from now (IFSCA requirement)
+          const kycExpiryDate = new Date();
+          kycExpiryDate.setFullYear(kycExpiryDate.getFullYear() + 1);
+          
+          // Register on blockchain
+          const blockchainResult = await KYCRegistrationService.registerKYCOnChain(
+            user.wallet_address,
+            ipfsHash,
+            user.id,
+            kycExpiryDate
+          );
+          
+          blockchainTxHash = blockchainResult.txHash;
+          
+          console.log('[Blockchain] ✅ KYC registered on-chain:', blockchainTxHash);
+          
+          // Update user record with blockchain info
+          await supabaseAdmin
+            .from('users')
+            .update({
+              blockchain_kyc_verified: true,
+              blockchain_kyc_tx_hash: blockchainTxHash,
+              blockchain_kyc_expiry: kycExpiryDate.toISOString()
+            })
+            .eq('id', user.id);
+          
+          // Log blockchain registration
+          await KYCRegistrationService.logBlockchainRegistration(
+            user.id,
+            user.wallet_address,
+            blockchainTxHash,
+            blockchainResult.identityHash,
+            blockchainResult.kycExpiry
+          );
+          
+        } else {
+          console.warn('[Blockchain] User has no wallet address, skipping on-chain registration');
+        }
+      } catch (blockchainError: any) {
+        // Log error but don't fail the approval
+        console.error('[Blockchain] Failed to register on-chain:', blockchainError);
+        logError('Blockchain KYC Registration', blockchainError, {
+          userId: document.user_id,
+          documentId,
+          note: 'KYC approved in DB but blockchain registration failed'
+        });
+      }
+    }
+
     // Create notification (without exposing sensitive comments)
     const { error: notificationError } = await supabaseAdmin
       .from('notifications')
@@ -184,7 +247,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       success: true,
       message: `Document ${action}ed successfully`,
-      userKycStatus
+      userKycStatus,
+      blockchainRegistered: !!blockchainTxHash,
+      blockchainTxHash
     });
 
   } catch (error) {

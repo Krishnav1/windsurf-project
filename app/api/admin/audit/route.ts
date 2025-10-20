@@ -39,6 +39,24 @@ export async function GET(request: NextRequest) {
     const endDate = searchParams.get('endDate') || '';
     const page = parseInt(searchParams.get('page') || '1');
     const limit = parseInt(searchParams.get('limit') || '50');
+
+    // Validate pagination parameters
+    if (page < 1) {
+      return NextResponse.json({ error: 'Page must be >= 1' }, { status: 400 });
+    }
+    if (limit < 1 || limit > 100) {
+      return NextResponse.json({ error: 'Limit must be between 1 and 100' }, { status: 400 });
+    }
+
+    const offset = (page - 1) * limit;
+    // Validate pagination parameters
+    if (page < 1) {
+      return NextResponse.json({ error: 'Page must be >= 1' }, { status: 400 });
+    }
+    if (limit < 1 || limit > 100) {
+      return NextResponse.json({ error: 'Limit must be between 1 and 100' }, { status: 400 });
+    }
+
     const offset = (page - 1) * limit;
 
     // Build query - try audit_logs_enhanced first, fallback to audit_logs
@@ -112,10 +130,10 @@ export async function GET(request: NextRequest) {
           total: fallbackCount || 0,
           totalPages: Math.ceil((fallbackCount || 0) / limit)
         }
-      });
-    }
-
-    if (error) {
+  } catch (error: any) {
+    console.error('Get audit logs error:', error);
+    return NextResponse.json({ error: 'Failed to retrieve audit logs' }, { status: 500 });
+  }
       throw error;
     }
 

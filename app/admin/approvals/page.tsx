@@ -64,7 +64,10 @@ export default function AdminApprovalsPage() {
   if (authLoading || loading) {
     return (
       <div className="min-h-screen bg-[#F4F7FB] flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#0B67FF]"></div>
+        <div className="flex flex-col items-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#0B67FF]" role="status" aria-label="Loading approval statistics"></div>
+          <span className="sr-only">Loading approval statistics...</span>
+        </div>
       </div>
     );
   }
