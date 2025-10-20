@@ -1,5 +1,9 @@
 /**
- * KYC Approval API Route
+ * KYC Approval API Route - DEPRECATED
+ * 
+ * @deprecated This endpoint is deprecated. Use /api/admin/kyc/verify instead.
+ * This old system approves entire users instead of individual documents.
+ * The new system provides document-level granularity and proper verification workflow.
  * 
  * POST /api/admin/kyc-approval
  * Allows admins to approve or reject user KYC requests
@@ -10,6 +14,18 @@ import { supabaseAdmin } from '@/lib/supabase/client';
 import { verifyToken } from '@/lib/utils/auth';
 
 export async function POST(request: NextRequest) {
+  // Return deprecation warning
+  return NextResponse.json(
+    { 
+      error: 'This endpoint is deprecated. Please use /api/admin/kyc/verify instead.',
+      deprecated: true,
+      newEndpoint: '/api/admin/kyc/verify',
+      message: 'The new endpoint provides document-level verification instead of user-level approval.'
+    },
+    { status: 410 } // 410 Gone - indicates deprecated/removed resource
+  );
+
+  /* DEPRECATED CODE - Kept for reference
   try {
     // Verify authentication
     const authHeader = request.headers.get('authorization');
@@ -144,13 +160,27 @@ export async function POST(request: NextRequest) {
       { status: 500 }
     );
   }
+  */
 }
 
 /**
- * GET /api/admin/kyc-approval
+ * GET /api/admin/kyc-approval - DEPRECATED
  * Get all pending KYC requests
+ * @deprecated Use /api/admin/kyc/documents instead
  */
 export async function GET(request: NextRequest) {
+  // Return deprecation warning
+  return NextResponse.json(
+    { 
+      error: 'This endpoint is deprecated. Please use /api/admin/kyc/documents instead.',
+      deprecated: true,
+      newEndpoint: '/api/admin/kyc/documents',
+      message: 'The new endpoint provides document-level data with proper grouping by user.'
+    },
+    { status: 410 } // 410 Gone
+  );
+
+  /* DEPRECATED CODE - Kept for reference
   try {
     // Verify authentication
     const authHeader = request.headers.get('authorization');
@@ -218,4 +248,5 @@ export async function GET(request: NextRequest) {
       { status: 500 }
     );
   }
+  */
 }

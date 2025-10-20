@@ -188,11 +188,8 @@ export default function AdminDashboardPage() {
 
   const fetchData = async (token: string) => {
     try {
-      const [overviewRes, usersRes, tokensRes] = await Promise.all([
+      const [overviewRes, tokensRes] = await Promise.all([
         fetch("/api/admin/overview", {
-          headers: { Authorization: `Bearer ${token}` },
-        }),
-        fetch("/api/admin/kyc-approval", {
           headers: { Authorization: `Bearer ${token}` },
         }),
         fetch("/api/tokens/issue", {
@@ -208,11 +205,6 @@ export default function AdminDashboardPage() {
       if (overviewData.success) {
         setOverview(overviewData);
         setError(null);
-      }
-
-      const usersData = await usersRes.json();
-      if (usersData.success && Array.isArray(usersData.users)) {
-        setUsers(usersData.users as KycUser[]);
       }
 
       const tokensData = await tokensRes.json();
@@ -239,36 +231,6 @@ export default function AdminDashboardPage() {
     }
   };
 
-  const handleKYCApproval = async (userId: string, action: 'approve' | 'reject') => {
-    const token = localStorage.getItem('token');
-    if (!token) return;
-
-    try {
-      const response = await fetch('/api/admin/kyc-approval', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          userId,
-          action,
-          rejectionReason: action === 'reject' ? 'Documents incomplete' : undefined,
-        }),
-      });
-
-      const data = await response.json();
-      if (data.success) {
-        alert(`KYC ${action}d successfully`);
-        fetchData(token);
-      } else {
-        alert(data.error);
-      }
-    } catch (error) {
-      console.error('Error:', error);
-      alert('Failed to update KYC status');
-    }
-  };
 
   const handleTokenApproval = async (tokenId: string, action: 'approve' | 'reject') => {
     const token = localStorage.getItem('token');
@@ -311,7 +273,6 @@ export default function AdminDashboardPage() {
     router.push('/');
   };
 
-  const pendingKYC = useMemo(() => users.filter((u) => u.kyc_status === "pending"), [users]);
   const pendingTokens = useMemo(() => tokens.filter((t) => t.status === "pending"), [tokens]);
 
   if (loading) {
@@ -400,8 +361,12 @@ export default function AdminDashboardPage() {
           </Card>
           <Card padding="lg" className="border border-[var(--neutral-200)] bg-white">
             <p className="text-xs uppercase tracking-wide text-[var(--neutral-500)]">Pending KYC</p>
-            <p className="mt-3 text-3xl font-semibold text-amber-600">{pendingKYC.length}</p>
-            <p className="text-xs text-[var(--neutral-500)]">Investors + Issuers awaiting review</p>
+            <p className="mt-3 text-3xl font-semibold text-amber-600">{overview?.userStats.pendingKYC ?? 0}</p>
+            <p className="text-xs text-[var(--neutral-500)]">
+              <Link href="/admin/kyc" className="text-[#0B67FF] hover:underline">
+                View KYC Dashboard →
+              </Link>
+            </p>
           </Card>
           <Card padding="lg" className="border border-[var(--neutral-200)] bg-white">
             <p className="text-xs uppercase tracking-wide text-[var(--neutral-500)]">Pending tokens</p>
@@ -430,7 +395,7 @@ export default function AdminDashboardPage() {
               <div className="rounded-2xl border border-[var(--neutral-200)] bg-[var(--neutral-100)]/60 p-4">
                 <p className="text-xs uppercase tracking-wide text-[var(--neutral-500)]">Investors</p>
                 <p className="mt-2 text-2xl font-semibold text-[var(--foreground)]">{overview?.userStats.totalInvestors ?? "—"}</p>
-                <p className="text-xs text-[var(--neutral-500)]">Pending KYC: {overview?.userStats.pendingKYC ?? pendingKYC.length}</p>
+                <p className="text-xs text-[var(--neutral-500)]">Pending KYC: {overview?.userStats.pendingKYC ?? 0}</p>
               </div>
             </div>
           </Card>
@@ -559,57 +524,56 @@ export default function AdminDashboardPage() {
 
         <section className="mt-12 space-y-8">
           <SectionHeading
-            eyebrow="Action required"
-            title="Pending KYC submissions"
-            description="Review identity and compliance documentation before activating participant access."
+            eyebrow="Quick Actions"
+            title="Approval Center"
+            description="Access all pending approvals and verification workflows from one place."
           />
-          {pendingKYC.length > 0 ? (
-            <div className="overflow-hidden rounded-2xl border border-[var(--neutral-200)] bg-white">
-              <table className="min-w-full divide-y divide-[var(--neutral-200)] text-sm">
-                <thead className="bg-[var(--neutral-100)]/80 text-xs uppercase tracking-wide text-[var(--neutral-500)]">
-                  <tr>
-                    <th className="px-6 py-3 text-left">User</th>
-                    <th className="px-6 py-3 text-left">Email</th>
-                    <th className="px-6 py-3 text-left">Role</th>
-                    <th className="px-6 py-3 text-left">Registered</th>
-                    <th className="px-6 py-3 text-left">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-[var(--neutral-100)]">
-                  {pendingKYC.map((u) => (
-                    <tr key={u.id} className="hover:bg-[var(--neutral-100)]/40">
-                      <td className="px-6 py-4 font-medium text-[var(--foreground)]">{u.full_name}</td>
-                      <td className="px-6 py-4 text-[var(--neutral-500)]">{u.email}</td>
-                      <td className="px-6 py-4">
-                        <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-semibold text-blue-700">{u.role}</span>
-                      </td>
-                      <td className="px-6 py-4 text-xs text-[var(--neutral-400)]">{new Date(u.created_at).toLocaleDateString()}</td>
-                      <td className="px-6 py-4">
-                        <div className="flex items-center gap-3 text-xs font-semibold">
-                          <button
-                            onClick={() => handleKYCApproval(u.id, "approve")}
-                            className="text-emerald-600 hover:text-emerald-700"
-                          >
-                            Approve
-                          </button>
-                          <button
-                            onClick={() => handleKYCApproval(u.id, "reject")}
-                            className="text-rose-600 hover:text-rose-700"
-                          >
-                            Reject
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : (
-            <Card padding="lg" className="border border-[var(--neutral-200)] bg-white text-sm text-[var(--neutral-500)]">
-              All KYC submissions are up to date.
-            </Card>
-          )}
+          <div className="grid gap-6 md:grid-cols-3">
+            <Link href="/admin/kyc">
+              <Card padding="lg" className="border border-[var(--neutral-200)] bg-white hover:shadow-lg transition-shadow cursor-pointer">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="w-12 h-12 bg-yellow-100 rounded-lg flex items-center justify-center">
+                    <svg className="w-6 h-6 text-yellow-600" fill="currentColor" viewBox="0 0 20 20">
+                      <path d="M9 2a1 1 0 000 2h2a1 1 0 100-2H9z" />
+                      <path fillRule="evenodd" d="M4 5a2 2 0 012-2 3 3 0 003 3h2a3 3 0 003-3 2 2 0 012 2v11a2 2 0 01-2 2H6a2 2 0 01-2-2V5zm3 4a1 1 0 000 2h.01a1 1 0 100-2H7zm3 0a1 1 0 000 2h3a1 1 0 100-2h-3zm-3 4a1 1 0 100 2h.01a1 1 0 100-2H7zm3 0a1 1 0 100 2h3a1 1 0 100-2h-3z" clipRule="evenodd" />
+                    </svg>
+                  </div>
+                  <span className="text-2xl font-bold text-yellow-600">{overview?.userStats.pendingKYC ?? 0}</span>
+                </div>
+                <h4 className="text-lg font-semibold text-[var(--foreground)]">KYC Verification</h4>
+                <p className="text-sm text-[var(--neutral-500)] mt-2">Review pending KYC documents</p>
+              </Card>
+            </Link>
+            
+            <Link href="/admin/approvals">
+              <Card padding="lg" className="border border-[var(--neutral-200)] bg-white hover:shadow-lg transition-shadow cursor-pointer">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
+                    <svg className="w-6 h-6 text-blue-600" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M6 2a1 1 0 00-1 1v1H4a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-1V3a1 1 0 10-2 0v1H7V3a1 1 0 00-1-1zm0 5a1 1 0 000 2h8a1 1 0 100-2H6z" clipRule="evenodd" />
+                    </svg>
+                  </div>
+                  <span className="text-2xl font-bold text-blue-600">{pendingTokens.length}</span>
+                </div>
+                <h4 className="text-lg font-semibold text-[var(--foreground)]">Approval Center</h4>
+                <p className="text-sm text-[var(--neutral-500)] mt-2">All pending approvals</p>
+              </Card>
+            </Link>
+            
+            <Link href="/admin/audit">
+              <Card padding="lg" className="border border-[var(--neutral-200)] bg-white hover:shadow-lg transition-shadow cursor-pointer">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="w-12 h-12 bg-gray-100 rounded-lg flex items-center justify-center">
+                    <svg className="w-6 h-6 text-gray-600" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M3 5a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM3 10a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM3 15a1 1 0 011-1h6a1 1 0 110 2H4a1 1 0 01-1-1z" clipRule="evenodd" />
+                    </svg>
+                  </div>
+                </div>
+                <h4 className="text-lg font-semibold text-[var(--foreground)]">Audit Logs</h4>
+                <p className="text-sm text-[var(--neutral-500)] mt-2">View system activity</p>
+              </Card>
+            </Link>
+          </div>
         </section>
 
         <section className="mt-12 space-y-8">

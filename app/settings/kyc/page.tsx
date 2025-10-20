@@ -17,6 +17,7 @@ export default function KYCPage() {
     panCard: null as File | null,
     photo: null as File | null,
   });
+  const [uploadedDocs, setUploadedDocs] = useState<any[]>([]);
 
   useEffect(() => {
     const token = localStorage.getItem('token');
@@ -33,14 +34,22 @@ export default function KYCPage() {
 
   const fetchKYCStatus = async (token: string) => {
     try {
-      const response = await fetch('/api/compliance/kyc', {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
-      });
+      const [statusRes, docsRes] = await Promise.all([
+        fetch('/api/compliance/kyc', {
+          headers: { 'Authorization': `Bearer ${token}` },
+        }),
+        fetch('/api/compliance/kyc-documents', {
+          headers: { 'Authorization': `Bearer ${token}` },
+        })
+      ]);
 
-      const data = await response.json();
-      setKycStatus(data);
+      const statusData = await statusRes.json();
+      const docsData = await docsRes.json();
+      
+      setKycStatus(statusData);
+      if (docsData.success) {
+        setUploadedDocs(docsData.documents);
+      }
     } catch (error) {
       console.error('Error fetching KYC status:', error);
     } finally {
@@ -50,6 +59,33 @@ export default function KYCPage() {
 
   const handleFileChange = (field: keyof typeof documents, file: File | null) => {
     setDocuments({ ...documents, [field]: file });
+  };
+
+  const handleDeleteDocument = async (documentId: string) => {
+    const token = localStorage.getItem('token');
+    if (!token) return;
+
+    if (!confirm('Are you sure you want to delete this document? You will need to upload a new one.')) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/compliance/kyc-documents?id=${documentId}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+
+      const data = await response.json();
+      if (data.success) {
+        alert('Document deleted successfully');
+        fetchKYCStatus(token);
+      } else {
+        alert(data.error || 'Failed to delete document');
+      }
+    } catch (error) {
+      console.error('Error deleting document:', error);
+      alert('Error deleting document');
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -76,7 +112,13 @@ export default function KYCPage() {
 
       const data = await response.json();
       if (data.success) {
-        alert('KYC documents submitted successfully!');
+        alert('KYC documents submitted successfully! You have 15 minutes to edit or delete if needed.');
+        setDocuments({
+          idProof: null,
+          addressProof: null,
+          panCard: null,
+          photo: null,
+        });
         fetchKYCStatus(token);
       } else {
         alert(data.error || 'Failed to submit KYC');
@@ -166,12 +208,66 @@ export default function KYCPage() {
           </div>
         </div>
 
+        {/* Uploaded Documents with Edit Window */}
+        {uploadedDocs.length > 0 && (
+          <div className="bg-white rounded-lg shadow p-6 mb-6">
+            <h3 className="text-xl font-bold text-gray-900 mb-4">Uploaded Documents</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {uploadedDocs.map((doc) => (
+                <div key={doc.id} className="border rounded-lg p-4">
+                  <div className="flex justify-between items-start mb-2">
+                    <div>
+                      <p className="font-medium text-gray-900">{doc.document_type.replace('_', ' ').toUpperCase()}</p>
+                      <p className="text-xs text-gray-500">{doc.file_name}</p>
+                    </div>
+                    <span className={`px-2 py-1 rounded text-xs font-medium ${
+                      doc.status === 'approved' ? 'bg-green-100 text-green-800' :
+                      doc.status === 'rejected' ? 'bg-red-100 text-red-800' :
+                      'bg-yellow-100 text-yellow-800'
+                    }`}>
+                      {doc.status}
+                    </span>
+                  </div>
+                  <p className="text-xs text-gray-500 mb-2">
+                    Uploaded: {new Date(doc.uploaded_at).toLocaleString()}
+                  </p>
+                  {doc.canEdit && (
+                    <div className="mt-3 p-2 bg-blue-50 rounded">
+                      <p className="text-xs text-blue-800 mb-2">
+                        ⏱️ You can delete this document for the next {doc.remainingMinutes} minute{doc.remainingMinutes !== 1 ? 's' : ''}
+                      </p>
+                      <button
+                        onClick={() => handleDeleteDocument(doc.id)}
+                        className="text-xs px-3 py-1 bg-red-600 text-white rounded hover:bg-red-700"
+                      >
+                        Delete Document
+                      </button>
+                    </div>
+                  )}
+                  {doc.editWindowExpired && (
+                    <p className="text-xs text-gray-500 mt-2">
+                      🔒 Edit window expired (15 min limit)
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Document Upload Form */}
         {kycStatus?.kycStatus !== 'approved' && (
           <div className="bg-white rounded-lg shadow p-6 mb-6">
             <h3 className="text-xl font-bold text-gray-900 mb-6">
               {kycStatus?.kycStatus === 'rejected' ? 'Resubmit KYC Documents' : 'Submit KYC Documents'}
             </h3>
+            {uploadedDocs.length > 0 && (
+              <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded">
+                <p className="text-sm text-yellow-800">
+                  ⚠️ <strong>Note:</strong> You have 15 minutes after upload to delete and re-upload documents if you made a mistake.
+                </p>
+              </div>
+            )}
 
             <form onSubmit={handleSubmit} className="space-y-6">
               {/* ID Proof */}
