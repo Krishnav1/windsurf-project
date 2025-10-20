@@ -13,6 +13,38 @@ import { SectionHeading } from "@/components/ui/SectionHeading";
 import { Card } from "@/components/ui/Card";
 import { Tooltip } from "@/components/ui/Tooltip";
 
+// Quick action cards for admin
+const ADMIN_QUICK_ACTIONS = [
+  {
+    title: 'KYC Verification',
+    description: 'Review and verify user KYC documents',
+    href: '/admin/kyc',
+    icon: '📋',
+    color: 'bg-blue-500'
+  },
+  {
+    title: 'Token Approvals',
+    description: 'Approve or reject token listings',
+    href: '/admin/tokens',
+    icon: '🪙',
+    color: 'bg-green-500'
+  },
+  {
+    title: 'User Management',
+    description: 'Manage platform users',
+    href: '/admin/users',
+    icon: '👥',
+    color: 'bg-purple-500'
+  },
+  {
+    title: 'Audit Logs',
+    description: 'View system audit trails',
+    href: '/admin/audit',
+    icon: '📊',
+    color: 'bg-orange-500'
+  }
+];
+
 type StoredUser = {
   id: string;
   role: "investor" | "issuer" | "admin" | "auditor";
@@ -335,6 +367,25 @@ export default function AdminDashboardPage() {
             {error}
           </div>
         )}
+
+        {/* Quick Actions */}
+        <section className="mt-10 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
+          {ADMIN_QUICK_ACTIONS.map((action) => (
+            <Link key={action.href} href={action.href}>
+              <Card padding="lg" className="border border-[var(--neutral-200)] bg-white hover:shadow-lg transition-shadow cursor-pointer h-full">
+                <div className="flex items-start gap-3">
+                  <div className={`${action.color} text-white p-3 rounded-lg text-2xl`}>
+                    {action.icon}
+                  </div>
+                  <div className="flex-1">
+                    <h3 className="font-semibold text-[var(--foreground)]">{action.title}</h3>
+                    <p className="text-xs text-[var(--neutral-500)] mt-1">{action.description}</p>
+                  </div>
+                </div>
+              </Card>
+            </Link>
+          ))}
+        </section>
 
         <section className="mt-10 grid gap-6 lg:grid-cols-4">
           <Card padding="lg" className="border border-[var(--neutral-200)] bg-white">

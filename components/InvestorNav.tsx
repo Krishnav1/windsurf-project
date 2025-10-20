@@ -9,6 +9,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useState, useEffect } from 'react';
 import WalletConnect from './WalletConnect';
+import NotificationBell from './NotificationBell';
 
 type InvestorNavProps = {
   showWalletConnect?: boolean;
@@ -103,6 +104,9 @@ export default function InvestorNav({
                 onDisconnect={onWalletDisconnect}
               />
             )}
+
+            {/* Notification Bell */}
+            <NotificationBell />
 
             {/* User Menu */}
             <div className="relative">

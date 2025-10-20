@@ -1,0 +1,52 @@
+# ==========================================
+# VERCEL ENVIRONMENT VARIABLES
+# ==========================================
+# Copy these EXACT values to Vercel Dashboard
+# Project Settings → Environment Variables
+# ==========================================
+
+# SUPABASE (Required)
+NEXT_PUBLIC_SUPABASE_URL=https://gviwynyikaaxcjjvuedg.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd2aXd5bnlpa2FheGNqanZ1ZWRnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjA2NjA1MjIsImV4cCI6MjA3NjIzNjUyMn0.t_cealReTDzITOrDADFpVPfqu4FUBnHkJWx2ivBf4l4
+
+# IMPORTANT: Get this from Supabase Dashboard → Settings → API → service_role key
+SUPABASE_SERVICE_ROLE_KEY=YOUR_SERVICE_ROLE_KEY_FROM_SUPABASE_DASHBOARD
+
+# SECURITY (Required - Generated)
+JWT_SECRET=7VuIS4J1gJUMocJd5/DiwC5Qc/+F/DMFUXH6pn/yf/Q=
+ENCRYPTION_KEY=245e89a2d830f9c87e25e6c864508f0b8ce430d7e69f8e61d84fe8b1a79f3589
+
+# BLOCKCHAIN (Required for token operations)
+NEXT_PUBLIC_RPC_URL=https://rpc-amoy.polygon.technology
+NEXT_PUBLIC_CHAIN_ID=80002
+
+# BLOCKCHAIN - Deployed Contracts (Add after deployment)
+NEXT_PUBLIC_ERC3643_TOKEN_ADDRESS=
+NEXT_PUBLIC_IDENTITY_REGISTRY_ADDRESS=
+NEXT_PUBLIC_COMPLIANCE_ADDRESS=
+
+# DEPLOYER (Optional - Only if deploying contracts from backend)
+DEPLOYER_PRIVATE_KEY=
+DEPLOYER_ADDRESS=
+
+# APPLICATION (Required)
+NEXT_PUBLIC_APP_URL=https://your-app.vercel.app
+NODE_ENV=production
+
+# OPTIONAL - Email Notifications
+SENDGRID_API_KEY=
+SENDGRID_FROM_EMAIL=
+
+# OPTIONAL - Payment Gateway
+RAZORPAY_KEY_ID=
+RAZORPAY_KEY_SECRET=
+
+# ==========================================
+# INSTRUCTIONS:
+# ==========================================
+# 1. Go to Vercel Dashboard → Your Project → Settings → Environment Variables
+# 2. Add each variable above (one by one)
+# 3. Set environment: Production, Preview, Development (check all 3)
+# 4. Get SUPABASE_SERVICE_ROLE_KEY from: https://app.supabase.com/project/gviwynyikaaxcjjvuedg/settings/api
+# 5. After adding all variables, redeploy your app
+# ==========================================
