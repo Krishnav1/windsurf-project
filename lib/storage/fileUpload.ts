@@ -111,8 +111,12 @@ export class FileUploadService {
     
     this.validateFile(file);
     
-    const fileExt = file.name.split('.').pop();
-    const fileName = `issuer/${tokenId}/${documentType}_${Date.now()}.${fileExt}`;
+    const lastDotIndex = file.name.lastIndexOf('.');
+    const fileExt = lastDotIndex > 0 ? file.name.substring(lastDotIndex + 1) : '';
+    const uniqueId = crypto.randomUUID();
+    const fileName = fileExt
+      ? `issuer/${tokenId}/${documentType}_${uniqueId}.${fileExt}`
+      : `issuer/${tokenId}/${documentType}_${uniqueId}`;
     
     const arrayBuffer = await file.arrayBuffer();
     const fileBuffer = Buffer.from(arrayBuffer);
@@ -235,15 +239,23 @@ export class FileUploadService {
     const filePath = urlParts.slice(-3).join('/'); // user_id/document_type_timestamp.ext
     
     // Delete from storage
-    await supabaseAdmin.storage
+    const { error: storageError } = await supabaseAdmin.storage
       .from(bucket)
       .remove([filePath]);
     
+    if (storageError) {
+      throw new Error(`Failed to delete file from storage: ${storageError.message}`);
+    }
+    
     // Delete from database
-    await supabaseAdmin
+    const { error: dbError } = await supabaseAdmin
       .from(tableName)
       .delete()
       .eq('id', documentId);
+    
+    if (dbError) {
+      throw new Error(`Failed to delete database record: ${dbError.message}`);
+    }
   }
 }
 

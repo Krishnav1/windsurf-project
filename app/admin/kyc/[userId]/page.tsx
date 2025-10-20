@@ -11,6 +11,7 @@ export default function KYCReviewPage() {
   const [user, setUser] = useState<any>(null);
   const [documents, setDocuments] = useState<any[]>([]);
   const [selectedDoc, setSelectedDoc] = useState<any>(null);
+  const [activeTab, setActiveTab] = useState<string>('aadhaar');
   const [showPreview, setShowPreview] = useState(false);
   const [loading, setLoading] = useState(true);
   const [verificationForm, setVerificationForm] = useState({
@@ -44,11 +45,17 @@ export default function KYCReviewPage() {
         setUser(data.user);
         setDocuments(data.documents);
         
-        // Auto-select document from query param
+        // Auto-select document from query param or first document
         const docId = searchParams.get('doc');
         if (docId) {
           const doc = data.documents.find((d: any) => d.id === docId);
-          if (doc) setSelectedDoc(doc);
+          if (doc) {
+            setSelectedDoc(doc);
+            setActiveTab(doc.document_type);
+          }
+        } else if (data.documents.length > 0) {
+          setSelectedDoc(data.documents[0]);
+          setActiveTab(data.documents[0].document_type);
         }
       }
     } catch (error) {
@@ -193,6 +200,46 @@ export default function KYCReviewPage() {
 
           {/* Main Content */}
           <div className="lg:col-span-2">
+            {/* Document Tabs */}
+            <div className="bg-white rounded-lg shadow mb-6">
+              <div className="border-b">
+                <nav className="flex -mb-px">
+                  {['aadhaar', 'pan', 'address_proof', 'photo'].map((docType) => {
+                    const doc = documents.find(d => d.document_type === docType);
+                    return (
+                      <button
+                        key={docType}
+                        onClick={() => {
+                          if (doc) {
+                            setSelectedDoc(doc);
+                            setActiveTab(docType);
+                          }
+                        }}
+                        disabled={!doc}
+                        className={`px-6 py-3 text-sm font-medium border-b-2 transition-colors ${
+                          activeTab === docType
+                            ? 'border-[#0B67FF] text-[#0B67FF]'
+                            : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                        } ${!doc ? 'opacity-50 cursor-not-allowed' : ''}`}
+                      >
+                        {docType === 'aadhaar' && '🆔 Aadhaar'}
+                        {docType === 'pan' && '💳 PAN Card'}
+                        {docType === 'address_proof' && '🏠 Address Proof'}
+                        {docType === 'photo' && '📸 Photo'}
+                        {doc && (
+                          <span className={`ml-2 inline-block w-2 h-2 rounded-full ${
+                            doc.status === 'approved' ? 'bg-green-500' :
+                            doc.status === 'rejected' ? 'bg-red-500' :
+                            'bg-yellow-500'
+                          }`} />
+                        )}
+                      </button>
+                    );
+                  })}
+                </nav>
+              </div>
+            </div>
+
             {selectedDoc ? (
               <div className="space-y-6">
                 {/* Document Preview */}
@@ -229,29 +276,101 @@ export default function KYCReviewPage() {
                       <p className="font-medium">{selectedDoc.file_name}</p>
                     </div>
                     <div>
+                      <p className="text-gray-500">File Size</p>
+                      <p className="font-medium">{(selectedDoc.file_size / 1024).toFixed(2)} KB</p>
+                    </div>
+                    <div>
+                      <p className="text-gray-500">File Type</p>
+                      <p className="font-medium">{selectedDoc.file_type}</p>
+                    </div>
+                    <div>
                       <p className="text-gray-500">Uploaded</p>
                       <p className="font-medium">{new Date(selectedDoc.uploaded_at).toLocaleString()}</p>
                     </div>
                     <div>
                       <p className="text-gray-500">File Hash</p>
-                      <p className="font-mono text-xs">{selectedDoc.file_hash?.substring(0, 16)}...</p>
+                      <p className="font-mono text-xs">{selectedDoc.file_hash?.substring(0, 20)}...</p>
                     </div>
                     <div>
-                      <p className="text-gray-500">Blockchain</p>
-                      <p className={selectedDoc.blockchain_verified ? 'text-green-600' : 'text-yellow-600'}>
-                        {selectedDoc.blockchain_verified ? '✓ Verified' : '⏳ Pending'}
+                      <p className="text-gray-500">Blockchain Status</p>
+                      <p className={selectedDoc.blockchain_verified ? 'text-green-600 font-medium' : 'text-yellow-600'}>
+                        {selectedDoc.blockchain_verified ? '✓ Verified on Chain' : '⏳ Pending Verification'}
                       </p>
                     </div>
                   </div>
+
+                  {/* Document-Specific Info */}
+                  {selectedDoc.document_type === 'aadhaar' && (
+                    <div className="mt-4 p-4 bg-blue-50 rounded-lg">
+                      <h4 className="font-semibold text-blue-900 mb-2">Aadhaar Verification Points</h4>
+                      <ul className="text-sm text-blue-800 space-y-1">
+                        <li>✓ Check photo clarity and matches selfie</li>
+                        <li>✓ Verify name matches across all documents</li>
+                        <li>✓ Ensure address is clearly visible</li>
+                        <li>✓ Check for any signs of tampering</li>
+                        <li>✓ Verify Aadhaar number format (12 digits)</li>
+                      </ul>
+                    </div>
+                  )}
+
+                  {selectedDoc.document_type === 'pan' && (
+                    <div className="mt-4 p-4 bg-purple-50 rounded-lg">
+                      <h4 className="font-semibold text-purple-900 mb-2">PAN Card Verification Points</h4>
+                      <ul className="text-sm text-purple-800 space-y-1">
+                        <li>✓ Verify PAN number format (AAAAA9999A)</li>
+                        <li>✓ Check name matches Aadhaar</li>
+                        <li>✓ Verify date of birth</li>
+                        <li>✓ Check signature is present</li>
+                        <li>✓ Ensure no tampering or alterations</li>
+                      </ul>
+                    </div>
+                  )}
+
+                  {selectedDoc.document_type === 'address_proof' && (
+                    <div className="mt-4 p-4 bg-green-50 rounded-lg">
+                      <h4 className="font-semibold text-green-900 mb-2">Address Proof Verification</h4>
+                      <ul className="text-sm text-green-800 space-y-1">
+                        <li>✓ Address clearly visible and readable</li>
+                        <li>✓ Document not older than 3 months</li>
+                        <li>✓ Name matches other documents</li>
+                        <li>✓ Official letterhead/stamp present</li>
+                      </ul>
+                    </div>
+                  )}
+
+                  {selectedDoc.document_type === 'photo' && (
+                    <div className="mt-4 p-4 bg-orange-50 rounded-lg">
+                      <h4 className="font-semibold text-orange-900 mb-2">Photo Verification</h4>
+                      <ul className="text-sm text-orange-800 space-y-1">
+                        <li>✓ Clear, recent photo</li>
+                        <li>✓ Face clearly visible</li>
+                        <li>✓ Matches photo on Aadhaar/PAN</li>
+                        <li>✓ No sunglasses or face covering</li>
+                      </ul>
+                    </div>
+                  )}
                 </div>
 
                 {/* Verification Form */}
                 <div className="bg-white rounded-lg shadow p-6">
-                  <h3 className="text-lg font-bold mb-4">Verification Checklist</h3>
+                  <h3 className="text-lg font-bold mb-4">Document Verification Checklist</h3>
                   
+                  <div className="mb-4 p-3 bg-gray-50 rounded-lg">
+                    <p className="text-sm text-gray-600">
+                      <strong>Current Document:</strong> {selectedDoc.document_type.replace('_', ' ').toUpperCase()}
+                    </p>
+                    <p className="text-sm text-gray-600">
+                      <strong>Status:</strong> <span className={`font-medium ${
+                        selectedDoc.status === 'approved' ? 'text-green-600' :
+                        selectedDoc.status === 'rejected' ? 'text-red-600' :
+                        'text-yellow-600'
+                      }`}>{selectedDoc.status}</span>
+                    </p>
+                  </div>
+
                   <div className="space-y-3 mb-6">
                     {Object.entries(verificationForm.checklist).map(([key, value]) => (
-                      <label key={key} className="flex items-center gap-3 cursor-pointer">
+                      <label key={key} className="flex items-start gap-3 cursor-pointer p-2 hover:bg-gray-50 rounded">
                         <input
                           type="checkbox"
                           checked={value}
@@ -259,17 +378,32 @@ export default function KYCReviewPage() {
                             ...verificationForm,
                             checklist: { ...verificationForm.checklist, [key]: e.target.checked }
                           })}
-                          className="w-5 h-5 text-[#0B67FF] rounded"
+                          className="w-5 h-5 text-[#0B67FF] rounded mt-0.5"
                         />
-                        <span className="text-gray-700">
-                          {key === 'photoMatches' && 'Photo matches selfie'}
-                          {key === 'namesMatch' && 'Names match across documents'}
-                          {key === 'addressVisible' && 'Address clearly visible'}
-                          {key === 'notExpired' && 'Document not expired'}
-                          {key === 'noTampering' && 'No signs of tampering'}
-                        </span>
+                        <div>
+                          <span className="text-gray-700 font-medium block">
+                            {key === 'photoMatches' && 'Photo matches selfie'}
+                            {key === 'namesMatch' && 'Names match across documents'}
+                            {key === 'addressVisible' && 'Address clearly visible'}
+                            {key === 'notExpired' && 'Document not expired'}
+                            {key === 'noTampering' && 'No signs of tampering'}
+                          </span>
+                          <span className="text-xs text-gray-500">
+                            {key === 'photoMatches' && 'Compare photo with selfie document'}
+                            {key === 'namesMatch' && 'Verify name consistency across all documents'}
+                            {key === 'addressVisible' && 'Ensure address is legible and complete'}
+                            {key === 'notExpired' && 'Check document validity period'}
+                            {key === 'noTampering' && 'Look for alterations, cuts, or edits'}
+                          </span>
+                        </div>
                       </label>
                     ))}
+                  </div>
+
+                  <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+                    <p className="text-sm text-yellow-800">
+                      <strong>⚠️ Note:</strong> All checklist items must be verified before approving this document.
+                    </p>
                   </div>
 
                   <div className="mb-6">

@@ -67,10 +67,14 @@ export async function POST(request: NextRequest) {
     }
 
     // Update user KYC status to pending
-    await supabaseAdmin
+    const { error: updateError } = await supabaseAdmin
       .from('users')
       .update({ kyc_status: 'pending' })
       .eq('id', decoded.userId);
+
+    if (updateError) {
+      throw new Error(`Failed to update KYC status: ${updateError.message}`);
+    }
 
     // Create notification for admin
     await supabaseAdmin

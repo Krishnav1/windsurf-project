@@ -49,13 +49,13 @@ export async function POST(request: NextRequest) {
     }
 
     // Get document
-    const { data: document } = await supabaseAdmin
+    const { data: document, error: docError } = await supabaseAdmin
       .from('kyc_documents')
       .select('*, users!kyc_documents_user_id_fkey(*)')
       .eq('id', documentId)
       .single();
 
-    if (!document) {
+    if (docError || !document) {
       return NextResponse.json({ error: 'Document not found' }, { status: 404 });
     }
 
@@ -85,7 +85,7 @@ export async function POST(request: NextRequest) {
       .eq('id', documentId);
 
     // Log verification history
-    await supabaseAdmin
+    const { error: historyError } = await supabaseAdmin
       .from('document_verification_history')
       .insert({
         document_id: documentId,
@@ -100,6 +100,11 @@ export async function POST(request: NextRequest) {
         verification_method: 'manual',
         created_at: new Date().toISOString()
       });
+
+    if (historyError) {
+      console.error('Failed to log verification history:', historyError);
+      // Consider whether to fail the request or continue
+    }
 
     // Check if all user's documents are approved
     const { data: allUserDocs } = await supabaseAdmin
@@ -166,6 +171,6 @@ export async function POST(request: NextRequest) {
 
   } catch (error: any) {
     console.error('KYC verification error:', error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
