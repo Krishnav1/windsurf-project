@@ -6,6 +6,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/client';
 import { verifyToken } from '@/lib/utils/auth';
+import crypto from 'crypto';
+import { uploadWithPublicUrl } from '@/lib/storage/storageService';
+import { sanitizeError, logError } from '@/lib/utils/errorHandler';
 
 export async function POST(request: NextRequest) {
   try {
@@ -63,58 +66,95 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
     }
 
-    // Upload to Supabase Storage
-    const fileExt = file.name.split('.').pop();
-    const fileName = `${assetId}/${Date.now()}.${fileExt}`;
+    // Upload to Supabase Storage with proper error handling
+    const lastDotIndex = file.name.lastIndexOf('.');
+    const fileExt = lastDotIndex > 0 ? file.name.substring(lastDotIndex + 1) : '';
+    const uniqueId = crypto.randomUUID();
+    const fileName = fileExt ? `${assetId}/${uniqueId}.${fileExt}` : `${assetId}/${uniqueId}`;
     const bucket = mediaType === 'image' ? 'assets-images' : 'assets-videos';
 
     const arrayBuffer = await file.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
 
-    const { data: uploadData, error: uploadError } = await supabaseAdmin
-      .storage
-      .from(bucket)
-      .upload(fileName, buffer, {
-        contentType: file.type,
-        upsert: false
-      });
-
-    if (uploadError) {
-      console.error('Upload error:', uploadError);
-      return NextResponse.json({ error: 'Upload failed' }, { status: 500 });
+    let publicUrl: string;
+    let filePath: string;
+    
+    try {
+      const uploadResult = await uploadWithPublicUrl(
+        bucket,
+        fileName,
+        buffer,
+        { contentType: file.type, upsert: false }
+      );
+      publicUrl = uploadResult.publicUrl;
+      filePath = uploadResult.filePath;
+    } catch (uploadError) {
+      logError('Asset Media Upload', uploadError as Error, { assetId });
+      return NextResponse.json({ error: 'File upload failed' }, { status: 500 });
     }
 
-    // Get public URL
-    const { data: { publicUrl } } = supabaseAdmin
-      .storage
-      .from(bucket)
-      .getPublicUrl(fileName);
-
-    // If this is primary, unset other primary images
-    if (isPrimary) {
-      await supabaseAdmin
-        .from('asset_media')
-        .update({ is_primary: false })
-        .eq('asset_id', assetId)
-        .eq('media_type', 'image');
-    }
-
-    // Save to database
+    // Save to database with file_path first
     const { data: media, error: dbError } = await supabaseAdmin
       .from('asset_media')
       .insert({
         asset_id: assetId,
         media_type: mediaType,
         file_url: publicUrl,
+        file_path: filePath,
         file_size: file.size,
-        is_primary: isPrimary
+        is_primary: false // Always insert as false first
       })
       .select()
       .single();
 
     if (dbError) {
-      console.error('Database error:', dbError);
+      // Rollback: Delete uploaded file to prevent orphaned files
+      try {
+        await supabaseAdmin.storage
+          .from(bucket)
+          .remove([filePath]);
+      } catch (cleanupError) {
+        logError('File Cleanup Failed', cleanupError as Error, { filePath, assetId });
+      }
+      logError('Asset Media DB Insert', dbError, { assetId });
       return NextResponse.json({ error: 'Failed to save media' }, { status: 500 });
+    }
+
+    // If this should be primary, use atomic single query to prevent race condition
+    let finalIsPrimary = false;
+    if (isPrimary && mediaType === 'image') {
+      // Atomic update: set all to false, then set this one to true in a single transaction
+      const { error: atomicError } = await supabaseAdmin.rpc('set_primary_media', {
+        p_asset_id: assetId,
+        p_media_id: media.id,
+        p_media_type: mediaType
+      });
+      
+      if (atomicError) {
+        // Fallback to sequential updates if RPC doesn't exist
+        logError('Atomic Primary Update Failed, using fallback', atomicError, { assetId });
+        
+        const { error: resetError } = await supabaseAdmin
+          .from('asset_media')
+          .update({ is_primary: false })
+          .eq('asset_id', assetId)
+          .eq('media_type', 'image');
+        
+        if (!resetError) {
+          const { error: setPrimaryError } = await supabaseAdmin
+            .from('asset_media')
+            .update({ is_primary: true })
+            .eq('id', media.id);
+          
+          finalIsPrimary = !setPrimaryError;
+          
+          if (setPrimaryError) {
+            logError('Set Primary Failed', setPrimaryError, { mediaId: media.id });
+          }
+        }
+      } else {
+        finalIsPrimary = true;
+      }
     }
 
     return NextResponse.json({
@@ -123,14 +163,14 @@ export async function POST(request: NextRequest) {
         id: media.id,
         url: publicUrl,
         type: mediaType,
-        isPrimary
+        isPrimary: finalIsPrimary // Return actual state from DB, not input
       }
     });
 
-  } catch (error: any) {
-    console.error('Upload media error:', error);
+  } catch (error) {
+    logError('Upload Media', error as Error);
     return NextResponse.json(
-      { error: error.message || 'Internal server error' },
+      { error: sanitizeError(error as Error) },
       { status: 500 }
     );
   }

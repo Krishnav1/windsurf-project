@@ -7,6 +7,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/client';
 import { verifyToken } from '@/lib/utils/auth';
 import { EncryptionService } from '@/lib/security/encryption';
+import { updateUserKycStatus } from '@/lib/services/kycStatusService';
+import { sanitizeError, logError } from '@/lib/utils/errorHandler';
 
 export async function POST(request: NextRequest) {
   try {
@@ -48,6 +50,15 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Validate verificationLevel if provided
+    const validLevels = ['L1', 'L2', 'L3'];
+    if (verificationLevel && !validLevels.includes(verificationLevel)) {
+      return NextResponse.json(
+        { error: 'Invalid verification level. Must be L1, L2, or L3' },
+        { status: 400 }
+      );
+    }
+
     // Get document
     const { data: document, error: docError } = await supabaseAdmin
       .from('kyc_documents')
@@ -73,16 +84,31 @@ export async function POST(request: NextRequest) {
     // Update document status
     const newStatus = action === 'approve' ? 'approved' : action === 'reject' ? 'rejected' : 'flagged';
     
-    await supabaseAdmin
+    // Encrypt rejection reason if provided
+    let encryptedRejection = null;
+    if (action === 'reject' && comments) {
+      const encrypted = EncryptionService.encrypt(comments);
+      encryptedRejection = JSON.stringify({
+        encrypted: encrypted.encrypted,
+        iv: encrypted.iv,
+        authTag: encrypted.authTag
+      });
+    }
+    
+    const { error: updateError } = await supabaseAdmin
       .from('kyc_documents')
       .update({
         status: newStatus,
         reviewed_by: admin.id,
         reviewed_at: new Date().toISOString(),
-        rejection_reason: action === 'reject' ? comments : null,
+        rejection_reason: encryptedRejection,
         verification_level: verificationLevel || 'L1'
       })
       .eq('id', documentId);
+    
+    if (updateError) {
+      throw new Error(`Failed to update document: ${updateError.message}`);
+    }
 
     // Log verification history
     const { error: historyError } = await supabaseAdmin
@@ -106,47 +132,33 @@ export async function POST(request: NextRequest) {
       // Consider whether to fail the request or continue
     }
 
-    // Check if all user's documents are approved
-    const { data: allUserDocs } = await supabaseAdmin
-      .from('kyc_documents')
-      .select('status')
-      .eq('user_id', document.user_id);
+    // Update user's overall KYC status using centralized service
+    const userKycStatus = await updateUserKycStatus(document.user_id);
 
-    const allApproved = allUserDocs?.every(doc => doc.status === 'approved');
-    const hasRejected = allUserDocs?.some(doc => doc.status === 'rejected');
-
-    // Update user KYC status
-    let userKycStatus = 'pending';
-    if (allApproved) {
-      userKycStatus = 'approved';
-    } else if (hasRejected) {
-      userKycStatus = 'rejected';
-    }
-
-    await supabaseAdmin
-      .from('users')
-      .update({ kyc_status: userKycStatus })
-      .eq('id', document.user_id);
-
-    // Create notification
-    await supabaseAdmin
+    // Create notification (without exposing sensitive comments)
+    const { error: notificationError } = await supabaseAdmin
       .from('notifications')
       .insert({
         user_id: document.user_id,
         type: 'kyc_status_update',
         title: `KYC ${action === 'approve' ? 'Approved' : action === 'reject' ? 'Rejected' : 'Flagged'}`,
         message: action === 'approve'
-          ? 'Your KYC document has been approved.'
+          ? `Your ${document.document_type} document has been approved. Overall KYC status: ${userKycStatus}.`
           : action === 'reject'
-          ? `Your KYC document was rejected. Reason: ${comments}`
-          : 'Your KYC document has been flagged for review.',
+          ? `Your ${document.document_type} document requires resubmission. Please check your email for details.`
+          : 'Your KYC document has been flagged for additional review.',
         priority: 'high',
         read: false,
         created_at: new Date().toISOString()
       });
+    
+    if (notificationError) {
+      logError('KYC Notification', notificationError, { documentId, userId: document.user_id });
+      // Non-critical, continue
+    }
 
     // Log audit
-    await supabaseAdmin
+    const { error: auditError } = await supabaseAdmin
       .from('audit_logs_enhanced')
       .insert({
         user_id: admin.id,
@@ -154,14 +166,20 @@ export async function POST(request: NextRequest) {
         resource_type: 'kyc_document',
         resource_id: documentId,
         details: {
-          targetUser: document.users.email,
+          targetUser: document.users?.email || 'unknown',
           documentType: document.document_type,
           action,
-          hasComments: !!comments
+          hasComments: !!comments,
+          newUserStatus: userKycStatus
         },
         severity: 'info',
         created_at: new Date().toISOString()
       });
+    
+    if (auditError) {
+      logError('KYC Audit Log', auditError, { documentId, adminId: admin.id });
+      // Non-critical, continue
+    }
 
     return NextResponse.json({
       success: true,
@@ -169,8 +187,8 @@ export async function POST(request: NextRequest) {
       userKycStatus
     });
 
-  } catch (error: any) {
-    console.error('KYC verification error:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  } catch (error) {
+    logError('KYC Verification', error as Error);
+    return NextResponse.json({ error: sanitizeError(error as Error) }, { status: 500 });
   }
 }

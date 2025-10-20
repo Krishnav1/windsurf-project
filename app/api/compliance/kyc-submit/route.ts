@@ -7,6 +7,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/client';
 import { verifyToken } from '@/lib/utils/auth';
 import { FileUploadService } from '@/lib/storage/fileUpload';
+import { sanitizeError, logError } from '@/lib/utils/errorHandler';
 
 export async function POST(request: NextRequest) {
   try {
@@ -45,10 +46,10 @@ export async function POST(request: NextRequest) {
             type: docType,
             ...result
           });
-        } catch (error: any) {
-          console.error(`Error uploading ${docType}:`, error);
+        } catch (error) {
+          logError(`Document Upload (${docType})`, error as Error, { userId: decoded.userId });
           return NextResponse.json(
-            { error: `Failed to upload ${docType}: ${error.message}` },
+            { error: `Failed to upload ${docType}` },
             { status: 500 }
           );
         }
@@ -77,7 +78,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Create notification for admin
-    await supabaseAdmin
+    const { error: notificationError } = await supabaseAdmin
       .from('notifications')
       .insert({
         user_id: decoded.userId,
@@ -88,8 +89,13 @@ export async function POST(request: NextRequest) {
         created_at: new Date().toISOString()
       });
 
+    if (notificationError) {
+      logError('KYC Submit Notification', notificationError, { userId: decoded.userId });
+      // Non-critical, continue execution
+    }
+
     // Log audit
-    await supabaseAdmin
+    const { error: auditError } = await supabaseAdmin
       .from('audit_logs_enhanced')
       .insert({
         user_id: decoded.userId,
@@ -102,6 +108,10 @@ export async function POST(request: NextRequest) {
         severity: 'info',
         created_at: new Date().toISOString()
       });
+    
+    if (auditError) {
+      logError('KYC Submit Audit', auditError, { userId: decoded.userId });
+    }
 
     return NextResponse.json({
       success: true,
@@ -109,10 +119,10 @@ export async function POST(request: NextRequest) {
       documents: uploadedDocs
     });
 
-  } catch (error: any) {
-    console.error('KYC submit error:', error);
+  } catch (error) {
+    logError('KYC Submit', error as Error);
     return NextResponse.json(
-      { error: error.message || 'Internal server error' },
+      { error: sanitizeError(error as Error) },
       { status: 500 }
     );
   }

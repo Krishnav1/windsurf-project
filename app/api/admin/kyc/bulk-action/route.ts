@@ -7,6 +7,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/client';
 import { verifyToken } from '@/lib/utils/auth';
 import { EncryptionService } from '@/lib/security/encryption';
+import { batchUpdateKycStatus } from '@/lib/services/kycStatusService';
+import { sanitizeError, logError } from '@/lib/utils/errorHandler';
 
 export async function POST(request: NextRequest) {
   try {
@@ -38,6 +40,7 @@ export async function POST(request: NextRequest) {
 
     const results = [];
     const batchSize = 10;
+    const affectedUserIds = new Set<string>();
     
     // Process in batches
     for (let i = 0; i < documentIds.length; i += batchSize) {
@@ -69,19 +72,37 @@ export async function POST(request: NextRequest) {
 
           const newStatus = action === 'approve' ? 'approved' : 'rejected';
 
+          // Encrypt rejection reason if provided
+          let encryptedRejection = null;
+          if (action === 'reject' && comments) {
+            const encrypted = EncryptionService.encrypt(comments);
+            encryptedRejection = JSON.stringify({
+              encrypted: encrypted.encrypted,
+              iv: encrypted.iv,
+              authTag: encrypted.authTag
+            });
+          }
+
           // Update document
-          await supabaseAdmin
+          const { error: updateError } = await supabaseAdmin
             .from('kyc_documents')
             .update({
               status: newStatus,
               reviewed_by: admin.id,
               reviewed_at: new Date().toISOString(),
-              rejection_reason: action === 'reject' ? comments : null
+              rejection_reason: encryptedRejection
             })
             .eq('id', docId);
+          
+          if (updateError) {
+            throw new Error(`Failed to update document: ${updateError.message}`);
+          }
+
+          // Track affected user for status update later
+          affectedUserIds.add(doc.user_id);
 
           // Log history
-          await supabaseAdmin
+          const { error: historyError } = await supabaseAdmin
             .from('document_verification_history')
             .insert({
               document_id: docId,
@@ -96,42 +117,37 @@ export async function POST(request: NextRequest) {
               verification_method: 'bulk',
               created_at: new Date().toISOString()
             });
+          
+          if (historyError) {
+            logError('Bulk History Log', historyError, { docId });
+          }
 
-          // Check user's overall KYC status
-          const { data: allUserDocs } = await supabaseAdmin
-            .from('kyc_documents')
-            .select('status')
-            .eq('user_id', doc.user_id);
+          // Don't update user status here - will be done after batch to avoid race conditions
 
-          const allApproved = allUserDocs?.every(d => d.status === 'approved');
-          const hasRejected = allUserDocs?.some(d => d.status === 'rejected');
-
-          const userKycStatus = allApproved ? 'approved' : hasRejected ? 'rejected' : 'pending';
-
-          await supabaseAdmin
-            .from('users')
-            .update({ kyc_status: userKycStatus })
-            .eq('id', doc.user_id);
-
-          // Send notification
-          await supabaseAdmin
+          // Send notification (without exposing sensitive comments)
+          const { error: notificationError } = await supabaseAdmin
             .from('notifications')
             .insert({
               user_id: doc.user_id,
               type: 'kyc_status_update',
               title: `KYC ${action === 'approve' ? 'Approved' : 'Rejected'}`,
               message: action === 'approve'
-                ? 'Your KYC document has been approved.'
-                : `Your KYC document was rejected. ${comments || ''}`,
+                ? `Your ${doc.document_type} document has been approved.`
+                : `Your ${doc.document_type} document requires resubmission. Please check your email for details.`,
               priority: 'high',
               read: false,
               created_at: new Date().toISOString()
             });
+          
+          if (notificationError) {
+            logError('Bulk Notification', notificationError, { docId, userId: doc.user_id });
+          }
 
-          return { docId, success: true, userKycStatus };
+          return { docId, success: true, userId: doc.user_id };
 
-        } catch (error: any) {
-          return { docId, success: false, error: error.message };
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+          return { docId, success: false, error: errorMessage };
         }
       });
 
@@ -143,9 +159,12 @@ export async function POST(request: NextRequest) {
         await new Promise(resolve => setTimeout(resolve, 1000));
       }
     }
+    
+    // Update user KYC statuses after all documents processed (prevents race conditions)
+    const userStatusResults = await batchUpdateKycStatus(Array.from(affectedUserIds));
 
     // Log bulk action
-    await supabaseAdmin
+    const { error: auditError } = await supabaseAdmin
       .from('audit_logs_enhanced')
       .insert({
         user_id: admin.id,
@@ -159,6 +178,10 @@ export async function POST(request: NextRequest) {
         severity: 'info',
         created_at: new Date().toISOString()
       });
+    
+    if (auditError) {
+      logError('Bulk Audit Log', auditError, { adminId: admin.id });
+    }
 
     const successCount = results.filter(r => r.success).length;
     const failCount = results.length - successCount;
@@ -166,11 +189,12 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       success: true,
       message: `Bulk action completed: ${successCount} succeeded, ${failCount} failed`,
-      results
+      results,
+      userStatusUpdates: userStatusResults // Return array directly instead of converting to object
     });
 
-  } catch (error: any) {
-    console.error('Bulk action error:', error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  } catch (error) {
+    logError('Bulk Action', error as Error);
+    return NextResponse.json({ error: sanitizeError(error as Error) }, { status: 500 });
   }
 }

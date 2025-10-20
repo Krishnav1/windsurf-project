@@ -7,6 +7,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/client';
 import { verifyToken } from '@/lib/utils/auth';
 import crypto from 'crypto';
+import { uploadWithPublicUrl } from '@/lib/storage/storageService';
+import { sanitizeError, logError } from '@/lib/utils/errorHandler';
 
 export async function POST(request: NextRequest) {
   try {
@@ -64,29 +66,28 @@ export async function POST(request: NextRequest) {
     const buffer = Buffer.from(arrayBuffer);
     const fileHash = crypto.createHash('sha256').update(buffer).digest('hex');
 
-    // Upload to Supabase Storage
-    const fileName = `${assetId}/${documentType}_${Date.now()}.pdf`;
+    // Upload to Supabase Storage with proper error handling
+    const uniqueId = crypto.randomUUID();
+    const fileName = `${assetId}/${documentType}_${uniqueId}.pdf`;
 
-    const { data: uploadData, error: uploadError } = await supabaseAdmin
-      .storage
-      .from('assets-documents')
-      .upload(fileName, buffer, {
-        contentType: 'application/pdf',
-        upsert: false
-      });
-
-    if (uploadError) {
-      console.error('Upload error:', uploadError);
-      return NextResponse.json({ error: 'Upload failed' }, { status: 500 });
+    let publicUrl: string;
+    let filePath: string;
+    
+    try {
+      const uploadResult = await uploadWithPublicUrl(
+        'assets-documents',
+        fileName,
+        buffer,
+        { contentType: 'application/pdf', upsert: false }
+      );
+      publicUrl = uploadResult.publicUrl;
+      filePath = uploadResult.filePath;
+    } catch (uploadError) {
+      logError('Asset Document Upload', uploadError as Error, { assetId });
+      return NextResponse.json({ error: 'File upload failed' }, { status: 500 });
     }
 
-    // Get public URL
-    const { data: { publicUrl } } = supabaseAdmin
-      .storage
-      .from('assets-documents')
-      .getPublicUrl(fileName);
-
-    // Save to database
+    // Save to database with file_path
     const { data: document, error: dbError } = await supabaseAdmin
       .from('asset_documents')
       .insert({
@@ -94,6 +95,7 @@ export async function POST(request: NextRequest) {
         document_type: documentType,
         document_name: documentName,
         file_url: publicUrl,
+        file_path: filePath,
         file_hash: fileHash,
         file_size: file.size,
         is_public: true
@@ -102,12 +104,20 @@ export async function POST(request: NextRequest) {
       .single();
 
     if (dbError) {
-      console.error('Database error:', dbError);
+      // Rollback: Delete uploaded file to prevent orphaned files
+      try {
+        await supabaseAdmin.storage
+          .from('assets-documents')
+          .remove([filePath]);
+      } catch (cleanupError) {
+        logError('File Cleanup Failed', cleanupError as Error, { filePath, assetId });
+      }
+      logError('Asset Document DB Insert', dbError, { assetId });
       return NextResponse.json({ error: 'Failed to save document' }, { status: 500 });
     }
 
     // Log audit
-    await supabaseAdmin.from('audit_logs').insert({
+    const { error: auditError } = await supabaseAdmin.from('audit_logs').insert({
       user_id: decoded.userId,
       action: 'document_uploaded',
       resource_type: 'asset_document',
@@ -120,6 +130,10 @@ export async function POST(request: NextRequest) {
       },
       severity: 'info'
     });
+    
+    if (auditError) {
+      logError('Asset Document Audit', auditError, { assetId, documentId: document.id });
+    }
 
     return NextResponse.json({
       success: true,
@@ -133,10 +147,10 @@ export async function POST(request: NextRequest) {
       }
     });
 
-  } catch (error: any) {
-    console.error('Upload document error:', error);
+  } catch (error) {
+    logError('Upload Document', error as Error);
     return NextResponse.json(
-      { error: error.message || 'Internal server error' },
+      { error: sanitizeError(error as Error) },
       { status: 500 }
     );
   }

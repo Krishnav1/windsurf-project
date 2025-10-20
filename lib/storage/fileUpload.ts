@@ -6,6 +6,9 @@
 import { supabaseAdmin } from '@/lib/supabase/client';
 import { EncryptionService } from '@/lib/security/encryption';
 import { DocumentIntegrityService } from '@/lib/security/documentIntegrity';
+import { uploadWithPublicUrl } from '@/lib/storage/storageService';
+import { logError } from '@/lib/utils/errorHandler';
+import { processDocumentWithRetry } from '@/lib/blockchain/retryService';
 
 export interface UploadResult {
   fileUrl: string;
@@ -29,9 +32,13 @@ export class FileUploadService {
     // Validate file
     this.validateFile(file);
     
-    // Generate unique filename
-    const fileExt = file.name.split('.').pop();
-    const fileName = `${userId}/${documentType}_${Date.now()}.${fileExt}`;
+    // Generate unique filename with proper extension handling
+    const lastDotIndex = file.name.lastIndexOf('.');
+    const fileExt = lastDotIndex > 0 ? file.name.substring(lastDotIndex + 1) : '';
+    const uniqueId = crypto.randomUUID();
+    const fileName = fileExt
+      ? `${userId}/${documentType}_${uniqueId}.${fileExt}`
+      : `${userId}/${documentType}_${uniqueId}`;
     
     // Convert to buffer for hashing
     const arrayBuffer = await file.arrayBuffer();
@@ -40,30 +47,31 @@ export class FileUploadService {
     // Generate hash before upload
     const fileHash = EncryptionService.generateHash(fileBuffer);
     
-    // Upload to Supabase Storage
-    const { data: uploadData, error: uploadError } = await supabaseAdmin.storage
-      .from('kyc-documents')
-      .upload(fileName, file, {
-        cacheControl: '3600',
-        upsert: false
-      });
+    // Upload to Supabase Storage and get public URL with error handling
+    let publicUrl: string;
+    let filePath: string;
     
-    if (uploadError) {
-      throw new Error(`Upload failed: ${uploadError.message}`);
+    try {
+      const uploadResult = await uploadWithPublicUrl(
+        'kyc-documents',
+        fileName,
+        file,
+        { cacheControl: '3600', upsert: false }
+      );
+      publicUrl = uploadResult.publicUrl;
+      filePath = uploadResult.filePath;
+    } catch (uploadError) {
+      throw new Error(`File upload failed: ${(uploadError as Error).message}`);
     }
     
-    // Get public URL
-    const { data: { publicUrl } } = supabaseAdmin.storage
-      .from('kyc-documents')
-      .getPublicUrl(fileName);
-    
-    // Create database record
+    // Create database record with file_path for easier deletion
     const { data: docRecord, error: dbError } = await supabaseAdmin
       .from('kyc_documents')
       .insert({
         user_id: userId,
         document_type: documentType,
         file_url: publicUrl,
+        file_path: filePath,
         file_name: file.name,
         file_size: file.size,
         file_type: file.type,
@@ -75,19 +83,33 @@ export class FileUploadService {
       .single();
     
     if (dbError) {
-      // Rollback storage upload
-      await supabaseAdmin.storage
-        .from('kyc-documents')
-        .remove([fileName]);
+      // Rollback: Delete uploaded file to prevent orphaned files
+      try {
+        await supabaseAdmin.storage
+          .from('kyc-documents')
+          .remove([filePath]);
+      } catch (cleanupError) {
+        logError('File Cleanup Failed', cleanupError as Error, { filePath, userId });
+      }
       throw new Error(`Database error: ${dbError.message}`);
     }
     
-    // Queue for blockchain storage
-    await DocumentIntegrityService.processDocument(
-      fileBuffer,
-      docRecord.id,
-      userId
-    );
+    // Queue for blockchain storage with retry mechanism
+    try {
+      await processDocumentWithRetry(
+        () => DocumentIntegrityService.processDocument(fileBuffer, docRecord.id, userId),
+        docRecord.id,
+        userId,
+        { maxRetries: 3, initialDelay: 1000 }
+      );
+    } catch (error) {
+      // Log error but don't fail the upload - document is already in DB
+      logError('Blockchain Processing Failed', error as Error, { 
+        documentId: docRecord.id, 
+        userId,
+        note: 'Document saved but blockchain storage failed after retries'
+      });
+    }
     
     return {
       fileUrl: publicUrl,
@@ -122,23 +144,24 @@ export class FileUploadService {
     const fileBuffer = Buffer.from(arrayBuffer);
     const fileHash = EncryptionService.generateHash(fileBuffer);
     
-    // Upload to storage
-    const { data: uploadData, error: uploadError } = await supabaseAdmin.storage
-      .from('issuer-documents')
-      .upload(fileName, file, {
-        cacheControl: '3600',
-        upsert: false
-      });
+    // Upload to storage and get public URL with error handling
+    let publicUrl: string;
+    let filePath: string;
     
-    if (uploadError) {
-      throw new Error(`Upload failed: ${uploadError.message}`);
+    try {
+      const uploadResult = await uploadWithPublicUrl(
+        'issuer-documents',
+        fileName,
+        file,
+        { cacheControl: '3600', upsert: false }
+      );
+      publicUrl = uploadResult.publicUrl;
+      filePath = uploadResult.filePath;
+    } catch (uploadError) {
+      throw new Error(`File upload failed: ${(uploadError as Error).message}`);
     }
     
-    const { data: { publicUrl } } = supabaseAdmin.storage
-      .from('issuer-documents')
-      .getPublicUrl(fileName);
-    
-    // Create database record
+    // Create database record with file_path for easier deletion
     const { data: docRecord, error: dbError } = await supabaseAdmin
       .from('issuer_documents')
       .insert({
@@ -147,6 +170,7 @@ export class FileUploadService {
         document_type: documentType,
         document_category: documentCategory,
         file_url: publicUrl,
+        file_path: filePath,
         file_name: file.name,
         file_size: file.size,
         file_type: file.type,
@@ -158,10 +182,32 @@ export class FileUploadService {
       .single();
     
     if (dbError) {
-      await supabaseAdmin.storage
-        .from('issuer-documents')
-        .remove([fileName]);
+      // Rollback: Delete uploaded file to prevent orphaned files
+      try {
+        await supabaseAdmin.storage
+          .from('issuer-documents')
+          .remove([filePath]);
+      } catch (cleanupError) {
+        logError('File Cleanup Failed', cleanupError as Error, { filePath, issuerId });
+      }
       throw new Error(`Database error: ${dbError.message}`);
+    }
+    
+    // Queue for blockchain storage with retry mechanism (consistent with KYC documents)
+    try {
+      await processDocumentWithRetry(
+        () => DocumentIntegrityService.processDocument(fileBuffer, docRecord.id, issuerId),
+        docRecord.id,
+        issuerId,
+        { maxRetries: 3, initialDelay: 1000 }
+      );
+    } catch (error) {
+      // Log error but don't fail the upload - document is already in DB
+      logError('Blockchain Processing Failed (Issuer)', error as Error, { 
+        documentId: docRecord.id, 
+        issuerId,
+        note: 'Document saved but blockchain storage failed after retries'
+      });
     }
     
     return {
@@ -223,20 +269,29 @@ export class FileUploadService {
     tableName: 'kyc_documents' | 'issuer_documents'
   ): Promise<void> {
     
-    // Get file path
-    const { data: doc } = await supabaseAdmin
+    // Get file path from database (more reliable than parsing URL)
+    const { data: doc, error: fetchError } = await supabaseAdmin
       .from(tableName)
-      .select('file_url')
+      .select('file_path, file_url')
       .eq('id', documentId)
       .single();
     
-    if (!doc) {
+    if (fetchError || !doc) {
       throw new Error('Document not found');
     }
     
-    // Extract file path from URL
-    const urlParts = doc.file_url.split('/');
-    const filePath = urlParts.slice(-3).join('/'); // user_id/document_type_timestamp.ext
+    // Use stored file_path if available, otherwise extract from URL
+    let filePath = doc.file_path;
+    if (!filePath) {
+      // Fallback: extract from URL (for old records without file_path)
+      const url = new URL(doc.file_url);
+      const pathParts = url.pathname.split('/');
+      const bucketIndex = pathParts.indexOf(bucket);
+      if (bucketIndex === -1) {
+        throw new Error('Invalid file URL format');
+      }
+      filePath = pathParts.slice(bucketIndex + 1).join('/');
+    }
     
     // Delete from storage
     const { error: storageError } = await supabaseAdmin.storage
