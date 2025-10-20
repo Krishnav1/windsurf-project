@@ -1,7 +1,7 @@
 /**
  * Portfolio Page
  * 
- * Displays user's token holdings and transaction history
+ * Displays user's token holdings and transaction history with enhanced features
  */
 
 'use client';
@@ -10,7 +10,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { getTokenBalance, getInvestorDetails } from '@/lib/blockchain/erc3643Service';
-import WalletConnect from '@/components/WalletConnect';
+import InvestorNav from '@/components/InvestorNav';
 
 export default function PortfolioPage() {
   const router = useRouter();
@@ -23,6 +23,13 @@ export default function PortfolioPage() {
   const [investorInfo, setInvestorInfo] = useState<any>(null);
   const [investmentLimit, setInvestmentLimit] = useState<any>(null);
   const [walletAddress, setWalletAddress] = useState<string | null>(null);
+  const [filters, setFilters] = useState({
+    search: '',
+    status: 'all',
+    sortBy: 'value',
+    sortOrder: 'desc' as 'asc' | 'desc',
+  });
+  const [viewMode, setViewMode] = useState<'table' | 'card'>('table');
 
   useEffect(() => {
     const token = localStorage.getItem('token');
@@ -79,11 +86,63 @@ export default function PortfolioPage() {
     }
   };
 
-  const handleLogout = () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
-    router.push('/');
+  const filteredAndSortedPortfolio = () => {
+    let filtered = [...portfolio];
+
+    // Apply search filter
+    if (filters.search) {
+      filtered = filtered.filter(item =>
+        item.tokens?.token_name?.toLowerCase().includes(filters.search.toLowerCase()) ||
+        item.tokens?.token_symbol?.toLowerCase().includes(filters.search.toLowerCase())
+      );
+    }
+
+    // Apply status filter
+    if (filters.status !== 'all') {
+      filtered = filtered.filter(item => {
+        if (filters.status === 'active') return !item.tokens?.is_frozen;
+        if (filters.status === 'frozen') return item.tokens?.is_frozen;
+        return true;
+      });
+    }
+
+    // Apply sorting
+    filtered.sort((a, b) => {
+      let aVal, bVal;
+      switch (filters.sortBy) {
+        case 'name':
+          aVal = a.tokens?.token_name || '';
+          bVal = b.tokens?.token_name || '';
+          break;
+        case 'balance':
+          aVal = a.balance;
+          bVal = b.balance;
+          break;
+        case 'value':
+          aVal = a.currentValue || 0;
+          bVal = b.currentValue || 0;
+          break;
+        default:
+          return 0;
+      }
+      
+      if (filters.sortOrder === 'asc') {
+        return aVal > bVal ? 1 : -1;
+      } else {
+        return aVal < bVal ? 1 : -1;
+      }
+    });
+
+    return filtered;
   };
+
+  const totalPortfolioValue = portfolio.reduce((sum, item) => sum + (item.currentValue || 0), 0);
+  const totalGainLoss = portfolio.reduce((sum, item) => {
+    const purchaseValue = (item.purchase_price || item.marketPrice) * item.balance;
+    const currentValue = item.currentValue || 0;
+    return sum + (currentValue - purchaseValue);
+  }, 0);
+  const gainLossPercentage = totalPortfolioValue > 0 ? (totalGainLoss / (totalPortfolioValue - totalGainLoss)) * 100 : 0;
 
   if (loading) {
     return (
@@ -98,37 +157,11 @@ export default function PortfolioPage() {
 
   return (
     <div className="min-h-screen bg-[#F4F7FB]">
-      {/* Navigation */}
-      <nav className="bg-white border-b border-gray-200">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center h-16">
-            <div className="flex items-center gap-8">
-              <Link href="/">
-                <h1 className="text-2xl font-bold text-[#0B67FF]">TokenPlatform</h1>
-              </Link>
-              <Link href="/dashboard" className="text-gray-600 hover:text-gray-900">
-                Dashboard
-              </Link>
-              <Link href="/portfolio" className="text-[#0B67FF] font-medium">
-                Portfolio
-              </Link>
-            </div>
-            <div className="flex items-center gap-4">
-              <WalletConnect 
-                onConnect={handleWalletConnect}
-                onDisconnect={handleWalletDisconnect}
-              />
-              <span className="text-sm text-gray-600">{user?.fullName}</span>
-              <button
-                onClick={handleLogout}
-                className="px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-lg"
-              >
-                Logout
-              </button>
-            </div>
-          </div>
-        </div>
-      </nav>
+      <InvestorNav 
+        showWalletConnect={true}
+        onWalletConnect={handleWalletConnect}
+        onWalletDisconnect={handleWalletDisconnect}
+      />
 
       {/* Main Content */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -176,7 +209,7 @@ export default function PortfolioPage() {
         )}
 
         {/* Summary Cards */}
-        <div className="grid md:grid-cols-3 gap-6 mb-8">
+        <div className="grid md:grid-cols-4 gap-6 mb-8">
           <div className="bg-white rounded-lg shadow p-6">
             <p className="text-sm text-gray-500 mb-2">Demo Balance</p>
             <p className="text-3xl font-bold text-[#0B67FF]">
@@ -186,78 +219,242 @@ export default function PortfolioPage() {
           <div className="bg-white rounded-lg shadow p-6">
             <p className="text-sm text-gray-500 mb-2">Portfolio Value</p>
             <p className="text-3xl font-bold text-gray-900">
-              ₹{summary.totalPortfolioValue?.toLocaleString() || '0'}
+              ₹{totalPortfolioValue.toLocaleString()}
+            </p>
+          </div>
+          <div className="bg-white rounded-lg shadow p-6">
+            <p className="text-sm text-gray-500 mb-2">Total Gain/Loss</p>
+            <p className={`text-3xl font-bold ${totalGainLoss >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+              {totalGainLoss >= 0 ? '+' : ''}₹{totalGainLoss.toLocaleString()}
+            </p>
+            <p className={`text-sm ${totalGainLoss >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+              {totalGainLoss >= 0 ? '+' : ''}{gainLossPercentage.toFixed(2)}%
             </p>
           </div>
           <div className="bg-white rounded-lg shadow p-6">
             <p className="text-sm text-gray-500 mb-2">Total Assets</p>
             <p className="text-3xl font-bold text-gray-900">
-              {summary.totalAssets || 0}
+              {portfolio.length}
             </p>
+          </div>
+        </div>
+
+        {/* Filters and View Toggle */}
+        <div className="bg-white rounded-lg shadow p-4 mb-6">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div className="flex flex-wrap items-center gap-4">
+              <input
+                type="text"
+                placeholder="Search tokens..."
+                value={filters.search}
+                onChange={(e) => setFilters({ ...filters, search: e.target.value })}
+                className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#0B67FF] focus:border-transparent"
+              />
+              <select
+                value={filters.status}
+                onChange={(e) => setFilters({ ...filters, status: e.target.value })}
+                className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#0B67FF] focus:border-transparent"
+              >
+                <option value="all">All Status</option>
+                <option value="active">Active</option>
+                <option value="frozen">Frozen</option>
+              </select>
+              <select
+                value={filters.sortBy}
+                onChange={(e) => setFilters({ ...filters, sortBy: e.target.value })}
+                className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#0B67FF] focus:border-transparent"
+              >
+                <option value="value">Sort by Value</option>
+                <option value="name">Sort by Name</option>
+                <option value="balance">Sort by Balance</option>
+              </select>
+              <button
+                onClick={() => setFilters({ ...filters, sortOrder: filters.sortOrder === 'asc' ? 'desc' : 'asc' })}
+                className="p-2 border border-gray-300 rounded-lg hover:bg-gray-50"
+              >
+                <svg className={`w-5 h-5 transition-transform ${filters.sortOrder === 'desc' ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+                </svg>
+              </button>
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setViewMode('table')}
+                className={`p-2 rounded-lg ${viewMode === 'table' ? 'bg-[#0B67FF] text-white' : 'bg-gray-100 text-gray-600'}`}
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M3 14h18m-9-4v8m-7 0h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                </svg>
+              </button>
+              <button
+                onClick={() => setViewMode('card')}
+                className={`p-2 rounded-lg ${viewMode === 'card' ? 'bg-[#0B67FF] text-white' : 'bg-gray-100 text-gray-600'}`}
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
+                </svg>
+              </button>
+            </div>
           </div>
         </div>
 
         {/* Holdings */}
         <div className="mb-8">
           <h3 className="text-xl font-bold text-gray-900 mb-4">Token Holdings</h3>
-          {portfolio.length > 0 ? (
-            <div className="bg-white rounded-lg shadow overflow-hidden">
-              <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Token</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Balance</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Locked</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Market Price</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Value</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                  </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
-                  {portfolio.map((item: any) => (
-                    <tr key={item.id}>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div>
-                          <div className="text-sm font-medium text-gray-900">
-                            {item.tokens?.token_name}
-                          </div>
-                          <div className="text-sm text-gray-500">{item.tokens?.token_symbol}</div>
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                        {item.balance}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                        {item.locked_balance || 0}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                        ₹{item.marketPrice}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                        ₹{item.currentValue?.toLocaleString()}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className={`px-2 py-1 text-xs rounded ${
-                          item.tokens?.is_frozen 
-                            ? 'bg-red-100 text-red-800' 
-                            : 'bg-green-100 text-green-800'
-                        }`}>
-                          {item.tokens?.is_frozen ? 'Frozen' : 'Active'}
-                        </span>
-                      </td>
+          {filteredAndSortedPortfolio().length > 0 ? (
+            viewMode === 'table' ? (
+              <div className="bg-white rounded-lg shadow overflow-hidden">
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Token</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Balance</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Locked</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Market Price</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Value</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Gain/Loss</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {filteredAndSortedPortfolio().map((item: any) => {
+                      const purchaseValue = (item.purchase_price || item.marketPrice) * item.balance;
+                      const currentValue = item.currentValue || 0;
+                      const gainLoss = currentValue - purchaseValue;
+                      const gainLossPercent = purchaseValue > 0 ? (gainLoss / purchaseValue) * 100 : 0;
+                      
+                      return (
+                        <tr key={item.id} className="hover:bg-gray-50">
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <Link href={`/asset/${item.token_id}`} className="flex items-center gap-3 hover:text-[#0B67FF]">
+                              <div>
+                                <div className="text-sm font-medium text-gray-900">
+                                  {item.tokens?.token_name}
+                                </div>
+                                <div className="text-sm text-gray-500">{item.tokens?.token_symbol}</div>
+                              </div>
+                            </Link>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                            {item.balance}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                            {item.locked_balance || 0}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                            ₹{item.marketPrice}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                            ₹{item.currentValue?.toLocaleString()}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm">
+                            <div className={`font-medium ${gainLoss >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                              {gainLoss >= 0 ? '+' : ''}₹{gainLoss.toLocaleString()}
+                            </div>
+                            <div className={`text-xs ${gainLoss >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                              {gainLoss >= 0 ? '+' : ''}{gainLossPercent.toFixed(2)}%
+                            </div>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <span className={`px-2 py-1 text-xs rounded ${
+                              item.tokens?.is_frozen 
+                                ? 'bg-red-100 text-red-800' 
+                                : 'bg-green-100 text-green-800'
+                            }`}>
+                              {item.tokens?.is_frozen ? 'Frozen' : 'Active'}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm">
+                            <div className="flex gap-2">
+                              <Link
+                                href={`/asset/${item.token_id}`}
+                                className="text-[#0B67FF] hover:text-[#2D9CDB] font-medium"
+                              >
+                                View
+                              </Link>
+                              <Link
+                                href={`/trading/${item.token_id}`}
+                                className="text-green-600 hover:text-green-700 font-medium"
+                              >
+                                Trade
+                              </Link>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {filteredAndSortedPortfolio().map((item: any) => {
+                  const purchaseValue = (item.purchase_price || item.marketPrice) * item.balance;
+                  const currentValue = item.currentValue || 0;
+                  const gainLoss = currentValue - purchaseValue;
+                  const gainLossPercent = purchaseValue > 0 ? (gainLoss / purchaseValue) * 100 : 0;
+                  
+                  return (
+                    <div key={item.id} className="bg-white rounded-lg shadow p-6 hover:shadow-lg transition-shadow">
+                      <Link href={`/asset/${item.token_id}`}>
+                        <h4 className="text-lg font-bold text-gray-900 mb-2 hover:text-[#0B67FF]">
+                          {item.tokens?.token_name}
+                        </h4>
+                        <p className="text-sm text-gray-500 mb-4">{item.tokens?.token_symbol}</p>
+                      </Link>
+                      <div className="space-y-3">
+                        <div className="flex justify-between">
+                          <span className="text-sm text-gray-600">Balance</span>
+                          <span className="text-sm font-medium">{item.balance} tokens</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-sm text-gray-600">Current Value</span>
+                          <span className="text-sm font-medium">₹{item.currentValue?.toLocaleString()}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-sm text-gray-600">Gain/Loss</span>
+                          <span className={`text-sm font-medium ${gainLoss >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                            {gainLoss >= 0 ? '+' : ''}₹{gainLoss.toLocaleString()} ({gainLoss >= 0 ? '+' : ''}{gainLossPercent.toFixed(2)}%)
+                          </span>
+                        </div>
+                        <div className="flex justify-between items-center pt-3 border-t">
+                          <span className={`px-2 py-1 text-xs rounded ${
+                            item.tokens?.is_frozen 
+                              ? 'bg-red-100 text-red-800' 
+                              : 'bg-green-100 text-green-800'
+                          }`}>
+                            {item.tokens?.is_frozen ? 'Frozen' : 'Active'}
+                          </span>
+                          <div className="flex gap-2">
+                            <Link
+                              href={`/asset/${item.token_id}`}
+                              className="text-sm text-[#0B67FF] hover:text-[#2D9CDB] font-medium"
+                            >
+                              View
+                            </Link>
+                            <Link
+                              href={`/trading/${item.token_id}`}
+                              className="text-sm text-green-600 hover:text-green-700 font-medium"
+                            >
+                              Trade
+                            </Link>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )
           ) : (
             <div className="bg-white rounded-lg shadow p-8 text-center">
-              <p className="text-gray-500">No token holdings yet</p>
+              <p className="text-gray-500">No token holdings found</p>
               <Link
-                href="/dashboard"
+                href="/marketplace"
                 className="mt-4 inline-block text-[#0B67FF] hover:text-[#2D9CDB]"
               >
-                Browse available tokens →
+                Browse Marketplace →
               </Link>
             </div>
           )}

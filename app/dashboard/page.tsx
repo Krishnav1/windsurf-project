@@ -549,14 +549,14 @@ export default function DashboardPage() {
           {activePortfolio.length > 0 ? (
             <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
               {activePortfolio.map((item) => (
-                <div key={item.id} className="card-surface p-5">
-                  <h4 className="text-lg font-semibold text-[var(--heading-color)]">{item.tokens?.token_name ?? 'Token'}</h4>
+                <Link key={item.id} href={`/asset/${item.token_id}`} className="card-surface p-5 hover:shadow-lg transition-shadow cursor-pointer">
+                  <h4 className="text-lg font-semibold text-[var(--heading-color)] hover:text-[var(--primary-color)]">{item.tokens?.token_name ?? 'Token'}</h4>
                   <p className="text-sm text-[var(--muted-text)]">{item.tokens?.token_symbol ?? '—'}</p>
                   <div className="mt-5">
                     <p className="text-3xl font-bold text-[var(--primary-color)]">{item.balance}</p>
                     <p className="text-xs uppercase text-[var(--muted-text)]">Tokens held</p>
                   </div>
-                </div>
+                </Link>
               ))}
             </div>
           ) : (
@@ -580,28 +580,38 @@ export default function DashboardPage() {
                   ? 'badge-success'
                   : 'badge-soft text-[var(--muted-text)] border-[var(--border-subtle)]';
                 return (
-                  <div key={token.id} className="card-surface p-6">
-                    <div className="mb-4 flex items-start justify-between">
-                      <div>
-                        <h4 className="text-lg font-semibold text-[var(--heading-color)]">{token.name}</h4>
-                        <p className="text-sm text-[var(--muted-text)]">{token.symbol}</p>
+                  <div key={token.id} className="card-surface p-6 hover:shadow-lg transition-shadow">
+                    <Link href={`/asset/${token.id}`}>
+                      <div className="mb-4 flex items-start justify-between">
+                        <div>
+                          <h4 className="text-lg font-semibold text-[var(--heading-color)] hover:text-[var(--primary-color)] cursor-pointer">{token.name}</h4>
+                          <p className="text-sm text-[var(--muted-text)]">{token.symbol}</p>
+                        </div>
+                        <span className={`pill text-xs ${badgeClass}`}>
+                          {formatLabel(token.status)}
+                        </span>
                       </div>
-                      <span className={`pill text-xs ${badgeClass}`}>
-                        {formatLabel(token.status)}
-                      </span>
-                    </div>
+                    </Link>
                     <p className="mb-4 text-sm text-[var(--subtle-text)]">{token.assetType ?? '—'}</p>
                     <div className="flex items-center justify-between">
                       <div>
                         <p className="text-xs text-[var(--muted-text)]">Total Supply</p>
                         <p className="text-lg font-semibold text-[var(--heading-color)]">{token.totalSupply.toLocaleString()}</p>
                       </div>
-                      <Link
-                        href={`/trading/${token.id}`}
-                        className="button-primary px-5 py-2 text-sm"
-                      >
-                        Trade
-                      </Link>
+                      <div className="flex gap-2">
+                        <Link
+                          href={`/asset/${token.id}`}
+                          className="px-4 py-2 text-sm font-medium text-[var(--primary-color)] hover:bg-blue-50 rounded-lg"
+                        >
+                          View
+                        </Link>
+                        <Link
+                          href={`/trading/${token.id}`}
+                          className="button-primary px-4 py-2 text-sm"
+                        >
+                          Trade
+                        </Link>
+                      </div>
                     </div>
                     {token.valuation ? (
                       <p className="mt-4 text-xs text-[var(--muted-text)]">Valuation: ₹{token.valuation.toLocaleString()}</p>
