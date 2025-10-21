@@ -33,7 +33,7 @@ export async function POST(request: NextRequest) {
     },
     { status: 410 } // 410 Gone - indicates deprecated/removed resource
   );
-}
+
   /* DEPRECATED CODE - Kept for reference
   try {
     // Verify authentication
