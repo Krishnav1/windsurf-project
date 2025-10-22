@@ -9,6 +9,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import InvestorNav from '@/components/InvestorNav';
 
 type StoredUser = {
   id: string;
@@ -250,45 +251,18 @@ export default function DashboardPage() {
 
   if (loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[var(--background)]">
-        <div className="glass-panel px-12 py-10 text-center">
-          <div className="mx-auto h-12 w-12 animate-spin rounded-full border-2 border-[var(--primary-color)] border-t-transparent" />
-          <p className="mt-4 text-sm text-[var(--muted-text)]">Preparing your dashboard…</p>
+      <div className="min-h-screen bg-[#F4F7FB]">
+        <InvestorNav />
+        <div className="flex items-center justify-center py-20">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#0B67FF]"></div>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-[var(--background)]">
-      {/* Navigation */}
-      <nav className="border-b border-[var(--border-subtle)] bg-white/90 backdrop-blur">
-        <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
-          <Link href="/" className="flex items-center gap-2">
-            <span className="pill badge-soft">Investor</span>
-            <h1 className="text-xl font-semibold text-[var(--heading-color)]">TokenPlatform</h1>
-          </Link>
-          <div className="flex items-center gap-4 text-sm text-[var(--muted-text)]">
-            {user && (
-              <span className="hidden sm:block">
-                {user.fullName} • {user.role}
-              </span>
-            )}
-            <Link
-              href="/support/grievance"
-              className="pill-outline rounded-full px-4 py-2"
-            >
-              Support
-            </Link>
-            <button
-              onClick={handleLogout}
-              className="pill-outline rounded-full px-4 py-2"
-            >
-              Logout
-            </button>
-          </div>
-        </div>
-      </nav>
+    <div className="min-h-screen bg-[#F4F7FB]">
+      <InvestorNav />
 
       {/* Main Content */}
       <div className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
@@ -309,19 +283,41 @@ export default function DashboardPage() {
         {/* Quick Actions Bar */}
         <div className="mb-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <Link
-            href="/compliance/kyc-submit"
+            href="/settings/kyc"
             className="card-surface flex items-center gap-4 p-4 transition hover:shadow-lg hover:border-[var(--primary-color)]"
           >
-            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-blue-100">
-              <svg className="h-6 w-6 text-blue-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <div className={`flex h-12 w-12 items-center justify-center rounded-full ${
+              effectiveKycStatus === 'approved' ? 'bg-green-100' :
+              effectiveKycStatus === 'rejected' ? 'bg-red-100' :
+              'bg-blue-100'
+            }`}>
+              <svg className={`h-6 w-6 ${
+                effectiveKycStatus === 'approved' ? 'text-green-600' :
+                effectiveKycStatus === 'rejected' ? 'text-red-600' :
+                'text-blue-600'
+              }`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M16 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/>
                 <circle cx="8.5" cy="7" r="4"/>
-                <path d="M20 8v6M23 11h-6"/>
+                {effectiveKycStatus === 'approved' ? (
+                  <path d="M22 11l-5 5-3-3"/>
+                ) : effectiveKycStatus === 'rejected' ? (
+                  <path d="M18 6L6 18M6 6l12 12"/>
+                ) : (
+                  <path d="M20 8v6M23 11h-6"/>
+                )}
               </svg>
             </div>
             <div>
-              <p className="text-sm font-semibold text-[#0A1628]">Complete KYC</p>
-              <p className="text-xs text-[#64748b]">Verify identity</p>
+              <p className="text-sm font-semibold text-[#0A1628]">
+                {effectiveKycStatus === 'approved' ? 'KYC Verified' :
+                 effectiveKycStatus === 'rejected' ? 'KYC Rejected' :
+                 kycInfo?.submission ? 'KYC Status' : 'Complete KYC'}
+              </p>
+              <p className="text-xs text-[#64748b]">
+                {effectiveKycStatus === 'approved' ? 'View details' :
+                 effectiveKycStatus === 'rejected' ? 'Resubmit' :
+                 kycInfo?.submission ? 'Under review' : 'Verify identity'}
+              </p>
             </div>
           </Link>
 

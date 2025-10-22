@@ -11,6 +11,8 @@ export default function KYCPage() {
   const [kycStatus, setKycStatus] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<string>('');
+  const [uploadError, setUploadError] = useState<string>('');
   const [documents, setDocuments] = useState({
     idProof: null as File | null,
     addressProof: null as File | null,
@@ -94,14 +96,26 @@ export default function KYCPage() {
     if (!token) return;
 
     setUploading(true);
-    const formData = new FormData();
+    setUploadProgress('Preparing documents...');
+    setUploadError('');
     
-    if (documents.idProof) formData.append('idProof', documents.idProof);
-    if (documents.addressProof) formData.append('addressProof', documents.addressProof);
-    if (documents.panCard) formData.append('panCard', documents.panCard);
-    if (documents.photo) formData.append('photo', documents.photo);
+    const formData = new FormData();
+    let docCount = 0;
+    
+    if (documents.idProof) { formData.append('idProof', documents.idProof); docCount++; }
+    if (documents.addressProof) { formData.append('addressProof', documents.addressProof); docCount++; }
+    if (documents.panCard) { formData.append('panCard', documents.panCard); docCount++; }
+    if (documents.photo) { formData.append('photo', documents.photo); docCount++; }
+
+    if (docCount === 0) {
+      setUploadError('Please select at least one document to upload');
+      setUploading(false);
+      return;
+    }
 
     try {
+      setUploadProgress(`Uploading ${docCount} document(s)...`);
+      
       const response = await fetch('/api/compliance/kyc-submit', {
         method: 'POST',
         headers: {
@@ -111,21 +125,37 @@ export default function KYCPage() {
       });
 
       const data = await response.json();
+      
       if (data.success) {
-        alert('KYC documents submitted successfully! You have 15 minutes to edit or delete if needed.');
-        setDocuments({
-          idProof: null,
-          addressProof: null,
-          panCard: null,
-          photo: null,
-        });
-        fetchKYCStatus(token);
+        setUploadProgress('✓ Upload complete! Encrypting and storing on IPFS...');
+        
+        // Show success message with details
+        setTimeout(() => {
+          alert(
+            `✅ KYC documents submitted successfully!\n\n` +
+            `• ${data.uploadedCount} document(s) uploaded\n` +
+            `• Encrypted and stored on IPFS\n` +
+            `• Upload time: ${(data.duration / 1000).toFixed(2)}s\n\n` +
+            `You have 15 minutes to edit or delete if needed.`
+          );
+          
+          setDocuments({
+            idProof: null,
+            addressProof: null,
+            panCard: null,
+            photo: null,
+          });
+          setUploadProgress('');
+          fetchKYCStatus(token);
+        }, 1000);
       } else {
-        alert(data.error || 'Failed to submit KYC');
+        setUploadError(data.error || data.details || 'Failed to submit KYC');
+        setUploadProgress('');
       }
     } catch (error) {
       console.error('Error submitting KYC:', error);
-      alert('Error submitting KYC documents');
+      setUploadError(`Network error: ${(error as Error).message}`);
+      setUploadProgress('');
     } finally {
       setUploading(false);
     }
@@ -256,16 +286,48 @@ export default function KYCPage() {
         )}
 
         {/* Document Upload Form */}
-        {kycStatus?.kycStatus !== 'approved' && (
+        {kycStatus?.kycStatus !== 'approved' && (uploadedDocs.length === 0 || kycStatus?.kycStatus === 'rejected') && (
           <div className="bg-white rounded-lg shadow p-6 mb-6">
             <h3 className="text-xl font-bold text-gray-900 mb-6">
               {kycStatus?.kycStatus === 'rejected' ? 'Resubmit KYC Documents' : 'Submit KYC Documents'}
             </h3>
+            {kycStatus?.kycStatus === 'rejected' && (
+              <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded">
+                <p className="text-sm text-red-800">
+                  ⚠️ <strong>Rejection Notice:</strong> Your previous submission was rejected. Please review the feedback and upload correct documents.
+                </p>
+              </div>
+            )}
             {uploadedDocs.length > 0 && (
               <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded">
                 <p className="text-sm text-yellow-800">
                   ⚠️ <strong>Note:</strong> You have 15 minutes after upload to delete and re-upload documents if you made a mistake.
                 </p>
+              </div>
+            )}
+
+            {/* Upload Progress */}
+            {uploadProgress && (
+              <div className="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                <div className="flex items-center gap-3">
+                  <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600"></div>
+                  <p className="text-sm font-medium text-blue-800">{uploadProgress}</p>
+                </div>
+              </div>
+            )}
+
+            {/* Upload Error */}
+            {uploadError && (
+              <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg">
+                <div className="flex items-start gap-3">
+                  <svg className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                  </svg>
+                  <div>
+                    <p className="text-sm font-medium text-red-800">Upload Failed</p>
+                    <p className="text-sm text-red-700 mt-1">{uploadError}</p>
+                  </div>
+                </div>
               </div>
             )}
 

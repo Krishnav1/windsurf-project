@@ -19,22 +19,48 @@ export default function Navbar() {
 
   useEffect(() => {
     checkAuth();
+    
+    // Listen for storage changes (login/logout from other tabs)
+    const handleStorageChange = () => {
+      checkAuth();
+    };
+    
+    window.addEventListener('storage', handleStorageChange);
+    return () => window.removeEventListener('storage', handleStorageChange);
   }, []);
 
   const checkAuth = async () => {
     const token = localStorage.getItem('token');
-    if (!token) return;
+    const userData = localStorage.getItem('user');
+    
+    if (!token || !userData) {
+      setUser(null);
+      return;
+    }
 
     try {
+      // First, use cached user data for immediate display
+      const cachedUser = JSON.parse(userData);
+      setUser(cachedUser);
+      
+      // Then verify with API in background
       const response = await fetch('/api/auth/me', {
         headers: { Authorization: `Bearer ${token}` }
       });
       if (response.ok) {
         const data = await response.json();
         setUser(data.user);
+        // Update localStorage with fresh data
+        localStorage.setItem('user', JSON.stringify(data.user));
+      } else {
+        // Token invalid, clear auth
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+        setUser(null);
       }
     } catch (error) {
       console.error('Auth check failed:', error);
+      // Keep cached user data on network error
     }
   };
 

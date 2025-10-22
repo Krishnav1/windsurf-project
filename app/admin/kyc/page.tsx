@@ -249,7 +249,7 @@ export default function AdminKYCDashboard() {
                       <p className="text-xs text-gray-500 mb-3">{doc.file_name}</p>
                       <Link
                         href={`/admin/kyc/${submission.user.id}?doc=${doc.id}`}
-                        className="block text-center px-3 py-2 bg-[#0B67FF] text-white text-sm rounded hover:bg-[#2D9CDB]"
+                        className="block text-center px-3 py-2 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 font-medium transition-colors"
                       >
                         Review
                       </Link>
