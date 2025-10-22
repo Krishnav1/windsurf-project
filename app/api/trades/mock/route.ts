@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/client';
 import { verifyToken, extractTokenFromHeader } from '@/lib/utils/auth';
+import { checkKYCStatus, checkInvestmentLimit } from '@/lib/middleware/requireKYC';
 
 const inMemoryTrades: Array<{
   id: string;
@@ -48,6 +49,23 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid or expired token' }, { status: 401 });
     }
 
+    // ✅ KYC CHECK - Users must have approved KYC to trade
+    console.log('[Trade API] Checking KYC status for user:', decoded.userId);
+    const kycCheck = await checkKYCStatus(token);
+    
+    if (!kycCheck.allowed) {
+      console.log('[Trade API] ❌ KYC check failed:', kycCheck.kycStatus);
+      return NextResponse.json({
+        error: 'KYC verification required to trade',
+        kycRequired: true,
+        kycStatus: kycCheck.kycStatus,
+        message: kycCheck.message,
+        redirectTo: '/settings/kyc'
+      }, { status: 403 });
+    }
+    
+    console.log('[Trade API] ✅ KYC approved, proceeding with trade');
+
     const { tokenId, side, quantity, price, settlementMethod = 'demo' } = await request.json();
 
     if (!tokenId || !side || !quantity || !price) {
@@ -65,6 +83,24 @@ export async function POST(request: NextRequest) {
     }
     if (Number.isNaN(prc) || prc <= 0) {
       return NextResponse.json({ error: 'price must be a positive number' }, { status: 400 });
+    }
+
+    // ✅ INVESTMENT LIMIT CHECK - Only for buy orders
+    if (side === 'buy') {
+      const totalAmount = qty * prc;
+      const limitCheck = await checkInvestmentLimit(decoded.userId, totalAmount);
+      
+      if (!limitCheck.allowed) {
+        console.log('[Trade API] ❌ Investment limit exceeded');
+        return NextResponse.json({
+          error: 'Investment limit exceeded',
+          message: limitCheck.message,
+          remainingLimit: limitCheck.limit,
+          requestedAmount: totalAmount
+        }, { status: 403 });
+      }
+      
+      console.log('[Trade API] ✅ Investment limit check passed');
     }
 
     const trade = buildTradeRecord({

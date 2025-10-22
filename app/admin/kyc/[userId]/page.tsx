@@ -14,6 +14,10 @@ export default function KYCReviewPage() {
   const [activeTab, setActiveTab] = useState<string>('aadhaar');
   const [showPreview, setShowPreview] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [downloading, setDownloading] = useState(false);
+  const [decryptedUrl, setDecryptedUrl] = useState<string | null>(null);
+  const [showRequestModal, setShowRequestModal] = useState(false);
+  const [requestReason, setRequestReason] = useState('');
   const [verificationForm, setVerificationForm] = useState({
     action: 'approve' as 'approve' | 'reject' | 'flag',
     comments: '',
@@ -65,6 +69,75 @@ export default function KYCReviewPage() {
     }
   };
 
+  const handleDownload = async () => {
+    const token = localStorage.getItem('token');
+    if (!token || !selectedDoc) return;
+
+    setDownloading(true);
+    try {
+      const response = await fetch(`/api/compliance/kyc-document/${selectedDoc.id}`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+
+      if (response.ok) {
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = selectedDoc.file_name;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+      } else {
+        alert('Failed to download document');
+      }
+    } catch (error) {
+      console.error('Download error:', error);
+      alert('Failed to download document');
+    } finally {
+      setDownloading(false);
+    }
+  };
+
+  const handleRequestResubmission = async () => {
+    const token = localStorage.getItem('token');
+    if (!token || !selectedDoc || !requestReason) {
+      alert('Please provide a reason for resubmission');
+      return;
+    }
+
+    try {
+      const response = await fetch('/api/admin/kyc/request-resubmission', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          userId: params.userId,
+          documentId: selectedDoc.id,
+          documentType: selectedDoc.document_type,
+          reason: requestReason
+        })
+      });
+
+      const data = await response.json();
+      if (data.success) {
+        alert('Resubmission request sent to user');
+        setShowRequestModal(false);
+        setRequestReason('');
+        fetchUserKYC(token);
+      } else {
+        alert(data.error || 'Failed to send request');
+      }
+    } catch (error) {
+      console.error('Request error:', error);
+      alert('Failed to send resubmission request');
+    }
+  };
+
   const handleVerify = async () => {
     const token = localStorage.getItem('token');
     if (!token || !selectedDoc) return;
@@ -89,6 +162,7 @@ export default function KYCReviewPage() {
         },
         body: JSON.stringify({
           documentId: selectedDoc.id,
+          userId: params.userId,
           action: verificationForm.action,
           comments: verificationForm.comments,
           verificationLevel: 'L1'
@@ -98,7 +172,16 @@ export default function KYCReviewPage() {
       const data = await response.json();
       if (data.success) {
         alert(data.message);
-        router.push('/admin/kyc');
+        // Check if all documents are approved
+        if (verificationForm.action === 'approve') {
+          const allApproved = documents.every(d => 
+            d.id === selectedDoc.id || d.status === 'approved'
+          );
+          if (allApproved) {
+            alert('All documents approved! User will be notified.');
+          }
+        }
+        fetchUserKYC(token);
       } else {
         alert(data.error);
       }
@@ -246,27 +329,71 @@ export default function KYCReviewPage() {
                 <div className="bg-white rounded-lg shadow p-6">
                   <div className="flex justify-between items-center mb-4">
                     <h3 className="text-lg font-bold">{selectedDoc.document_type.replace('_', ' ')}</h3>
-                    <button
-                      onClick={() => setShowPreview(true)}
-                      className="px-4 py-2 bg-[#0B67FF] text-white rounded-lg hover:bg-[#2D9CDB]"
-                    >
-                      Full Screen Preview
-                    </button>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={handleDownload}
+                        disabled={downloading}
+                        className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 flex items-center gap-2"
+                      >
+                        {downloading ? (
+                          <><div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div> Downloading...</>
+                        ) : (
+                          <>📥 Download</>  
+                        )}
+                      </button>
+                      <button
+                        onClick={() => setShowRequestModal(true)}
+                        className="px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700"
+                      >
+                        🔄 Request Resubmission
+                      </button>
+                      <button
+                        onClick={() => setShowPreview(true)}
+                        className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                      >
+                        🔍 Full Screen
+                      </button>
+                    </div>
                   </div>
                   
-                  <div className="border rounded-lg overflow-hidden bg-gray-100">
-                    {selectedDoc.file_type?.startsWith('image/') ? (
-                      <img
-                        src={selectedDoc.file_url}
-                        alt={selectedDoc.file_name}
-                        className="w-full h-96 object-contain"
-                      />
+                  <div className="border rounded-lg overflow-hidden bg-gray-100 relative">
+                    {selectedDoc.encrypted ? (
+                      <div className="flex flex-col items-center justify-center h-96 p-8 text-center">
+                        <div className="mb-4 text-6xl">🔒</div>
+                        <h4 className="text-xl font-bold text-gray-700 mb-2">Encrypted Document</h4>
+                        <p className="text-gray-600 mb-4">This document is encrypted with AES-256-GCM for security.</p>
+                        <div className="flex gap-3">
+                          <button
+                            onClick={handleDownload}
+                            disabled={downloading}
+                            className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium"
+                          >
+                            {downloading ? 'Decrypting & Downloading...' : 'Decrypt & Download'}
+                          </button>
+                        </div>
+                        <div className="mt-6 p-4 bg-blue-50 rounded-lg max-w-md">
+                          <p className="text-sm text-blue-800">
+                            <strong>🔐 Security Info:</strong><br/>
+                            • Stored on IPFS: {selectedDoc.ipfs_hash?.substring(0, 20)}...<br/>
+                            • File Hash: {selectedDoc.file_hash?.substring(0, 20)}...<br/>
+                            • Encryption: AES-256-GCM
+                          </p>
+                        </div>
+                      </div>
                     ) : (
-                      <iframe
-                        src={selectedDoc.file_url}
-                        className="w-full h-96"
-                        title="Document"
-                      />
+                      selectedDoc.file_type?.startsWith('image/') ? (
+                        <img
+                          src={selectedDoc.file_url}
+                          alt={selectedDoc.file_name}
+                          className="w-full h-96 object-contain"
+                        />
+                      ) : (
+                        <iframe
+                          src={selectedDoc.file_url}
+                          className="w-full h-96"
+                          title="Document"
+                        />
+                      )
                     )}
                   </div>
 
@@ -479,6 +606,62 @@ export default function KYCReviewPage() {
         onClose={() => setShowPreview(false)}
         document={selectedDoc}
       />
+
+      {/* Request Resubmission Modal */}
+      {showRequestModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg max-w-md w-full p-6">
+            <h3 className="text-xl font-bold mb-4">Request Document Resubmission</h3>
+            <p className="text-gray-600 mb-4">
+              The user will be notified to reupload: <strong>{selectedDoc?.document_type.replace('_', ' ')}</strong>
+            </p>
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Reason for Resubmission <span className="text-red-600">*</span>
+              </label>
+              <select
+                value={requestReason}
+                onChange={(e) => setRequestReason(e.target.value)}
+                className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-600 mb-2"
+              >
+                <option value="">Select reason...</option>
+                <option value="Document is blurry or unclear">Document is blurry or unclear</option>
+                <option value="Document has expired">Document has expired</option>
+                <option value="Name mismatch with other documents">Name mismatch with other documents</option>
+                <option value="Address not clearly visible">Address not clearly visible</option>
+                <option value="Signs of tampering detected">Signs of tampering detected</option>
+                <option value="Photo quality is poor">Photo quality is poor</option>
+                <option value="Document is incomplete">Document is incomplete</option>
+                <option value="Wrong document type uploaded">Wrong document type uploaded</option>
+              </select>
+              <textarea
+                value={requestReason}
+                onChange={(e) => setRequestReason(e.target.value)}
+                rows={3}
+                className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-600"
+                placeholder="Or provide custom reason..."
+              />
+            </div>
+            <div className="flex gap-3">
+              <button
+                onClick={handleRequestResubmission}
+                className="flex-1 px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 font-medium"
+              >
+                Send Request
+              </button>
+              <button
+                onClick={() => {
+                  setShowRequestModal(false);
+                  setRequestReason('');
+                }}
+                className="px-4 py-2 border rounded-lg hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

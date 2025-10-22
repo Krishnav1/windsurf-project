@@ -199,18 +199,41 @@ export async function POST(request: NextRequest) {
     }
 
     // Create notification (without exposing sensitive comments)
+    let notificationMessage = '';
+    let notificationTitle = '';
+    
+    if (action === 'approve') {
+      if (userKycStatus === 'approved') {
+        notificationTitle = '🎉 KYC Fully Approved!';
+        notificationMessage = `Congratulations! All your KYC documents have been verified and approved. You can now trade on the marketplace${blockchainTxHash ? ' and your identity is registered on blockchain.' : '.'}`;
+      } else {
+        notificationTitle = `✅ ${document.document_type.replace('_', ' ')} Approved`;
+        notificationMessage = `Your ${document.document_type.replace('_', ' ')} document has been approved. Overall KYC status: ${userKycStatus}.`;
+      }
+    } else if (action === 'reject') {
+      notificationTitle = `❌ ${document.document_type.replace('_', ' ')} Rejected`;
+      notificationMessage = `Your ${document.document_type.replace('_', ' ')} document requires resubmission. Please upload a new document.`;
+    } else {
+      notificationTitle = '⚠️ Document Flagged';
+      notificationMessage = 'Your KYC document has been flagged for additional review. Our team will contact you shortly.';
+    }
+    
     const { error: notificationError } = await supabaseAdmin
       .from('notifications')
       .insert({
         user_id: document.user_id,
-        type: 'kyc_status_update',
-        title: `KYC ${action === 'approve' ? 'Approved' : action === 'reject' ? 'Rejected' : 'Flagged'}`,
-        message: action === 'approve'
-          ? `Your ${document.document_type} document has been approved. Overall KYC status: ${userKycStatus}.`
-          : action === 'reject'
-          ? `Your ${document.document_type} document requires resubmission. Please check your email for details.`
-          : 'Your KYC document has been flagged for additional review.',
-        priority: 'high',
+        type: userKycStatus === 'approved' && action === 'approve' ? 'kyc_fully_approved' : 'kyc_status_update',
+        title: notificationTitle,
+        message: notificationMessage,
+        priority: userKycStatus === 'approved' && action === 'approve' ? 'critical' : 'high',
+        metadata: {
+          document_type: document.document_type,
+          document_id: documentId,
+          action: action,
+          overall_status: userKycStatus,
+          blockchain_registered: !!blockchainTxHash,
+          blockchain_tx: blockchainTxHash
+        },
         read: false,
         created_at: new Date().toISOString()
       });
