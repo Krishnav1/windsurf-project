@@ -3,7 +3,7 @@
  * Handles all interactions with ERC-3643 security tokens
  */
 
-import { ethers } from 'ethers';
+import { BrowserProvider, Contract, parseEther, formatEther, JsonRpcSigner } from 'ethers';
 
 // Window ethereum type declaration
 declare global {
@@ -62,8 +62,8 @@ export interface TokenBalance {
 }
 
 class ERC3643Service {
-  private provider: ethers.providers.Web3Provider | null = null;
-  private contract: ethers.Contract | null = null;
+  private provider: BrowserProvider | null = null;
+  private contract: Contract | null = null;
 
   /**
    * Initialize the service with a provider
@@ -73,13 +73,13 @@ class ERC3643Service {
       throw new Error('MetaMask not installed');
     }
 
-    this.provider = new ethers.providers.Web3Provider(window.ethereum);
+    this.provider = new BrowserProvider(window.ethereum);
     
     if (!ERC3643_TOKEN_ADDRESS) {
       throw new Error('ERC3643 token address not configured');
     }
 
-    this.contract = new ethers.Contract(
+    this.contract = new Contract(
       ERC3643_TOKEN_ADDRESS,
       ERC3643_ABI,
       this.provider
@@ -89,7 +89,7 @@ class ERC3643Service {
   /**
    * Get signer for transactions
    */
-  private async getSigner(): Promise<ethers.providers.JsonRpcSigner> {
+  private async getSigner(): Promise<JsonRpcSigner> {
     if (!this.provider) await this.initialize();
     return await this.provider!.getSigner();
   }
@@ -127,7 +127,7 @@ class ERC3643Service {
       const canTransferOnChain = await this.contract!.canTransfer(
         from,
         to,
-        ethers.utils.parseEther(amount.toString())
+        parseEther(amount.toString())
       );
 
       // Get detailed checks from API
@@ -178,8 +178,8 @@ class ERC3643Service {
         this.contract!.getFrozenTokens(address)
       ]);
 
-      const total = parseFloat(ethers.utils.formatEther(totalBalance));
-      const frozen = parseFloat(ethers.utils.formatEther(frozenBalance));
+      const total = parseFloat(formatEther(totalBalance));
+      const frozen = parseFloat(formatEther(frozenBalance));
 
       return {
         total,
@@ -227,7 +227,7 @@ class ERC3643Service {
 
       const tx = await contractWithSigner.transfer(
         to,
-        ethers.utils.parseEther(amount.toString())
+        parseEther(amount.toString())
       );
 
       await tx.wait();
@@ -258,7 +258,7 @@ class ERC3643Service {
     try {
       if (!this.contract) await this.initialize();
       const frozen = await this.contract!.getFrozenTokens(address);
-      return parseFloat(ethers.utils.formatEther(frozen));
+      return parseFloat(formatEther(frozen));
     } catch (error) {
       console.error('Error getting frozen tokens:', error);
       return 0;
@@ -277,7 +277,7 @@ class ERC3643Service {
 
       const tx = await contractWithSigner.freezePartialTokens(
         address,
-        ethers.utils.parseEther(amount.toString())
+        parseEther(amount.toString())
       );
 
       await tx.wait();
@@ -306,7 +306,7 @@ class ERC3643Service {
 
       const tx = await contractWithSigner.unfreezePartialTokens(
         address,
-        ethers.utils.parseEther(amount.toString())
+        parseEther(amount.toString())
       );
 
       await tx.wait();
@@ -369,7 +369,7 @@ class ERC3643Service {
 
       const tx = await contractWithSigner.mint(
         to,
-        ethers.utils.parseEther(amount.toString())
+        parseEther(amount.toString())
       );
 
       await tx.wait();
@@ -390,7 +390,7 @@ class ERC3643Service {
 
       const tx = await contractWithSigner.burn(
         from,
-        ethers.utils.parseEther(amount.toString())
+        parseEther(amount.toString())
       );
 
       await tx.wait();

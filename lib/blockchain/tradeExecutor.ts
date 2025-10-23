@@ -3,7 +3,7 @@
  * Executes token transfers on blockchain after payment confirmation
  */
 
-import { ethers } from 'ethers';
+import { JsonRpcProvider, Wallet, Contract, parseUnits, formatUnits } from 'ethers';
 import { supabaseAdmin } from '@/lib/supabase/client';
 import { logError } from '@/lib/utils/errorHandler';
 
@@ -27,8 +27,8 @@ export interface TokenTransferParams {
 
 export class TradeExecutor {
   
-  private static provider: ethers.providers.JsonRpcProvider;
-  private static wallet: ethers.Wallet;
+  private static provider: JsonRpcProvider;
+  private static wallet: Wallet;
 
   /**
    * Initialize blockchain connection
@@ -40,14 +40,14 @@ export class TradeExecutor {
         throw new Error('Blockchain RPC URL not configured');
       }
 
-      this.provider = new ethers.providers.JsonRpcProvider(rpcUrl);
+      this.provider = new JsonRpcProvider(rpcUrl);
       
       const privateKey = process.env.PLATFORM_PRIVATE_KEY;
       if (!privateKey) {
         throw new Error('Platform private key not configured');
       }
 
-      this.wallet = new ethers.Wallet(privateKey, this.provider);
+      this.wallet = new Wallet(privateKey, this.provider);
       console.log('[Trade Executor] Initialized with wallet:', this.wallet.address);
     }
   }
@@ -78,7 +78,7 @@ export class TradeExecutor {
         .eq('id', params.orderId);
 
       // Load token contract
-      const tokenContract = new ethers.Contract(
+      const tokenContract = new Contract(
         params.tokenAddress,
         ERC3643_ABI,
         this.wallet
@@ -95,7 +95,7 @@ export class TradeExecutor {
       console.log('[Trade Executor] ✓ Buyer KYC verified on-chain');
 
       // 2. Check if transfer is allowed by compliance rules
-      const amountInWei = ethers.utils.parseUnits(params.amount, 18);
+      const amountInWei = parseUnits(params.amount, 18);
       const canTransfer = await tokenContract.canTransfer(
         params.fromAddress,
         params.toAddress,
@@ -110,14 +110,15 @@ export class TradeExecutor {
       // 3. Check platform wallet balance
       const balance = await tokenContract.balanceOf(this.wallet.address);
       if (balance.lt(amountInWei)) {
-        throw new Error(`Insufficient token balance. Required: ${params.amount}, Available: ${ethers.utils.formatUnits(balance, 18)}`);
+        throw new Error(`Insufficient token balance. Required: ${params.amount}, Available: ${formatUnits(balance, 18)}`);
       }
       console.log('[Trade Executor] ✓ Sufficient balance');
 
       // EXECUTE TRANSFER
       console.log('[Trade Executor] Executing transfer...');
 
-      const gasPrice = await this.provider.getGasPrice();
+      const feeData = await this.provider.getFeeData();
+      const gasPrice = feeData.gasPrice || 0n;
       const gasLimit = 300000; // Estimate for ERC3643 transfer
 
       const tx = await tokenContract.transfer(
@@ -143,7 +144,7 @@ export class TradeExecutor {
           token_address: params.tokenAddress,
           amount: params.amount,
           tx_hash: tx.hash,
-          gas_price: ethers.utils.formatUnits(gasPrice, 'gwei'),
+          gas_price: formatUnits(gasPrice, 'gwei'),
           status: 'pending',
           submitted_at: new Date().toISOString()
         })
@@ -172,7 +173,7 @@ export class TradeExecutor {
       // Calculate gas cost in INR (approximate)
       const gasUsed = receipt.gasUsed;
       const gasCostWei = gasUsed.mul(gasPrice);
-      const gasCostEth = parseFloat(ethers.utils.formatEther(gasCostWei));
+      const gasCostEth = parseFloat(formatUnits(gasCostWei, 18));
       const ethPriceInr = 150000; // Approximate, should fetch from oracle
       const gasCostInr = gasCostEth * ethPriceInr;
 
@@ -424,14 +425,14 @@ export class TradeExecutor {
       }
 
       // Get balance from blockchain
-      const tokenContract = new ethers.Contract(
+      const tokenContract = new Contract(
         tokenAddress,
         ERC3643_ABI,
         this.provider
       );
 
       const balance = await tokenContract.balanceOf(wallet.wallet_address);
-      const balanceFormatted = ethers.utils.formatUnits(balance, 18);
+      const balanceFormatted = formatUnits(balance, 18);
 
       console.log('[Trade Executor] On-chain balance:', balanceFormatted);
 

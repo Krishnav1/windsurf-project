@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { ethers } from 'ethers';
+import { BrowserProvider } from 'ethers';
 
 interface WalletConnectProps {
   onConnect?: (address: string) => void;
@@ -43,13 +43,14 @@ export default function WalletConnect({ onConnect, onDisconnect }: WalletConnect
     if (typeof window === 'undefined' || !window.ethereum) return;
 
     try {
-      const provider = new ethers.providers.Web3Provider(window.ethereum);
+      const provider = new BrowserProvider(window.ethereum);
       const accounts = await provider.listAccounts();
       
       if (accounts.length > 0) {
-        setAddress(accounts[0]);
-        fetchBalance(accounts[0]);
-        if (onConnect) onConnect(accounts[0]);
+        const addr = await accounts[0].getAddress();
+        setAddress(addr);
+        fetchBalance(addr);
+        if (onConnect) onConnect(addr);
       }
     } catch (err) {
       console.error('Error checking connection:', err);
@@ -58,7 +59,7 @@ export default function WalletConnect({ onConnect, onDisconnect }: WalletConnect
 
   const fetchBalance = async (addr: string) => {
     try {
-      const provider = new ethers.providers.Web3Provider(window.ethereum);
+      const provider = new BrowserProvider(window.ethereum);
       const balance = await provider.getBalance(addr);
       setBalance((Number(balance) / 1e18).toFixed(4));
     } catch (err) {
@@ -114,7 +115,7 @@ export default function WalletConnect({ onConnect, onDisconnect }: WalletConnect
     setError(null);
 
     try {
-      const provider = new ethers.providers.Web3Provider(window.ethereum);
+      const provider = new BrowserProvider(window.ethereum);
       
       // Check current network
       const network = await provider.getNetwork();
