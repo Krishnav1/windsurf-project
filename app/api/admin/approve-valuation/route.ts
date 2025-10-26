@@ -9,6 +9,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/client';
 import { verifyToken } from '@/lib/auth/jwt';
+import { EmailService } from '@/lib/email/emailService';
 
 const IFSCA_THRESHOLD_PERCENTAGE = 20; // 20% price change requires IFSCA approval
 
@@ -141,6 +142,26 @@ export async function POST(request: NextRequest) {
         .eq('alert_data->>valuationId', valuationId)
         .eq('status', 'active');
 
+      // Send rejection email to issuer
+      try {
+        const { data: issuer } = await supabaseAdmin
+          .from('users')
+          .select('email, full_name')
+          .eq('id', valuation.submitted_by)
+          .single();
+
+        if (issuer) {
+          await EmailService.sendValuationRejectedToIssuer(
+            issuer.email,
+            valuation.tokens.token_symbol,
+            valuation.tokens.token_name,
+            reviewNotes || 'No specific reason provided'
+          );
+        }
+      } catch (emailError) {
+        console.error('Email notification error:', emailError);
+      }
+
       return NextResponse.json({
         success: true,
         message: 'Valuation rejected',
@@ -212,16 +233,28 @@ export async function POST(request: NextRequest) {
 
     let priceUpdated = false;
 
-    // If no IFSCA approval needed, update price immediately
+    // If no IFSCA approval needed, update price immediately using atomic transaction
     if (!requiresIFSCA) {
       try {
-        // Update token price
+        // Use atomic transaction function for price update
+        const { data: transactionResult, error: transactionError } = await supabaseAdmin
+          .rpc('update_price_with_transaction', {
+            p_token_id: valuation.token_id,
+            p_new_price: newPrice,
+            p_price_type: 'valuation',
+            p_valuation_id: valuationId,
+            p_reason: 'Quarterly valuation update',
+            p_changed_by: user.id
+          });
+
+        if (transactionError) {
+          throw new Error(`Transaction failed: ${transactionError.message}`);
+        }
+
+        // Update additional token fields
         await supabaseAdmin
           .from('tokens')
           .update({
-            current_price: newPrice,
-            price_per_token: newPrice,
-            last_price_update: new Date().toISOString(),
             last_valuation_date: valuation.valuation_date,
             next_valuation_due: new Date(new Date(valuation.valuation_date).getTime() + 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
             asset_valuation: valuation.valuation_amount,
@@ -229,24 +262,7 @@ export async function POST(request: NextRequest) {
           })
           .eq('id', valuation.token_id);
 
-        // Create price history record
-        const { data: priceHistory } = await supabaseAdmin
-          .from('token_price_history')
-          .insert({
-            token_id: valuation.token_id,
-            old_price: oldPrice,
-            new_price: newPrice,
-            price_type: 'valuation',
-            valuation_id: valuationId,
-            reason: 'Quarterly valuation update',
-            detailed_notes: reviewNotes || null,
-            changed_by: user.id,
-            approved_by: user.id,
-            approval_date: new Date().toISOString(),
-            effective_date: new Date().toISOString().split('T')[0],
-          })
-          .select()
-          .single();
+        const priceHistoryId = transactionResult.price_history_id;
 
         // Update price approval with price history reference
         await supabaseAdmin
@@ -257,15 +273,11 @@ export async function POST(request: NextRequest) {
             final_approved_at: new Date().toISOString(),
             price_updated: true,
             price_update_date: new Date().toISOString(),
-            price_history_id: priceHistory?.id,
+            price_history_id: priceHistoryId,
           })
           .eq('id', priceApproval.id);
 
-        // Update user holdings values
-        await supabaseAdmin.rpc('update_user_holdings_value', {
-          p_token_id: valuation.token_id,
-          p_new_price: newPrice,
-        });
+        // User holdings already updated by transaction function
 
         // Get all token holders for notification
         const { data: holders } = await supabaseAdmin
@@ -293,6 +305,33 @@ export async function POST(request: NextRequest) {
 
           await supabaseAdmin.from('notifications').insert(notifications);
 
+          // Send email notifications to holders
+          try {
+            const { data: holderUsers } = await supabaseAdmin
+              .from('users')
+              .select('id, email, full_name')
+              .in('id', holders.map(h => h.user_id));
+
+            if (holderUsers) {
+              for (const holderUser of holderUsers) {
+                const holding = holders.find(h => h.user_id === holderUser.id);
+                if (holding) {
+                  await EmailService.sendPriceUpdateToHolder(
+                    holderUser.email,
+                    holderUser.full_name || holderUser.email,
+                    tokenData.token_symbol,
+                    oldPrice,
+                    newPrice,
+                    changePercentage,
+                    holding.quantity
+                  );
+                }
+              }
+            }
+          } catch (emailError) {
+            console.error('Holder email notification error:', emailError);
+          }
+
           // Update price history with notification info
           await supabaseAdmin
             .from('token_price_history')
@@ -301,7 +340,29 @@ export async function POST(request: NextRequest) {
               notification_sent_at: new Date().toISOString(),
               total_holders_notified: holders.length,
             })
-            .eq('id', priceHistory?.id);
+            .eq('id', priceHistoryId);
+        }
+
+        // Send approval email to issuer
+        try {
+          const { data: issuer } = await supabaseAdmin
+            .from('users')
+            .select('email, full_name')
+            .eq('id', valuation.submitted_by)
+            .single();
+
+          if (issuer) {
+            await EmailService.sendValuationApprovedToIssuer(
+              issuer.email,
+              tokenData.token_symbol,
+              tokenData.token_name,
+              valuation.valuation_amount,
+              newPrice,
+              changePercentage
+            );
+          }
+        } catch (emailError) {
+          console.error('Issuer email notification error:', emailError);
         }
 
         priceUpdated = true;

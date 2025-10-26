@@ -1,11 +1,11 @@
 {
   "network": "polygon-amoy",
   "chainId": 80002,
-  "timestamp": "2025-10-20T22:14:55.835Z",
+  "timestamp": "2025-10-26T21:33:17.980Z",
   "contracts": {
-    "identityRegistry": "0xBfc90Ef56ee091D606b5FAe4dd3f949Cd49cd3BC",
-    "compliance": "0xd187c03c562cCb40ca707defB42A5bDb2C3C726F",
-    "token": "0x199c1C014B24532E46fe09Fed336dD6331Dd0024"
+    "identityRegistry": "0x5fA377678B4C1d4962A1621b8ADd4e6E3D23E11f",
+    "compliance": "0x6367189393976be92E61744bB7be6964A0E10288",
+    "token": "0xFAEBE3C88947C1dcA9fE13D252a6a8922B429bBd"
   },
   "deployer": "0xe100b8793F03Dadb8c8cFa4cFBF2D02F7aF953B1",
   "tokenInfo": {

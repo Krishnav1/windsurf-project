@@ -57,6 +57,7 @@ export default function IssuerValuationsPage() {
     valuationReport: null as File | null,
     valuationCertificate: null as File | null,
   });
+  const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (authLoading || !token) return;
@@ -104,10 +105,42 @@ export default function IssuerValuationsPage() {
     }
   };
 
+  const validateForm = (): boolean => {
+    const errors: Record<string, string> = {};
+
+    if (!formData.valuationDate) errors.valuationDate = 'Valuation date is required';
+    if (!formData.valuationAmount || parseFloat(formData.valuationAmount) <= 0) {
+      errors.valuationAmount = 'Valuation amount must be greater than 0';
+    }
+    if (!formData.valuationAgency.trim()) errors.valuationAgency = 'Valuation agency is required';
+    if (!formData.valuerName.trim()) errors.valuerName = 'Valuer name is required';
+    if (!formData.valuerRegistrationNo.trim()) errors.valuerRegistrationNo = 'Registration number is required';
+    if (formData.valuerContactEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.valuerContactEmail)) {
+      errors.valuerContactEmail = 'Invalid email format';
+    }
+    if (!files.valuationReport) errors.valuationReport = 'Valuation report is required';
+    if (files.valuationReport && files.valuationReport.size > 10 * 1024 * 1024) {
+      errors.valuationReport = 'File size must be less than 10MB';
+    }
+    if (files.valuationCertificate && files.valuationCertificate.size > 10 * 1024 * 1024) {
+      errors.valuationCertificate = 'File size must be less than 10MB';
+    }
+
+    setValidationErrors(errors);
+    return Object.keys(errors).length === 0;
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     setSuccess('');
+    setValidationErrors({});
+
+    if (!validateForm()) {
+      setError('Please fix the validation errors before submitting');
+      return;
+    }
+
     setSubmitting(true);
 
     if (!token) return;
@@ -140,9 +173,14 @@ export default function IssuerValuationsPage() {
         throw new Error(data.error || 'Failed to submit valuation');
       }
 
-      setSuccess('Valuation submitted successfully! Awaiting admin review.');
+      setSuccess('✅ Valuation submitted successfully! Redirecting to dashboard...');
       setShowForm(false);
       fetchValuations(selectedToken, token);
+      
+      // Redirect after 2 seconds
+      setTimeout(() => {
+        router.push('/issuer/dashboard');
+      }, 2000);
       
       // Reset form
       setFormData({
@@ -303,8 +341,13 @@ export default function IssuerValuationsPage() {
                     required
                     value={formData.valuationDate}
                     onChange={(e) => setFormData({...formData, valuationDate: e.target.value})}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#0B67FF]"
+                    className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-[#0B67FF] ${
+                      validationErrors.valuationDate ? 'border-red-500' : 'border-gray-300'
+                    }`}
                   />
+                  {validationErrors.valuationDate && (
+                    <p className="mt-1 text-sm text-red-600">{validationErrors.valuationDate}</p>
+                  )}
                 </div>
 
                 <div>
@@ -315,10 +358,16 @@ export default function IssuerValuationsPage() {
                     type="number"
                     required
                     step="0.01"
+                    min="0"
                     value={formData.valuationAmount}
                     onChange={(e) => setFormData({...formData, valuationAmount: e.target.value})}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#0B67FF]"
+                    className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-[#0B67FF] ${
+                      validationErrors.valuationAmount ? 'border-red-500' : 'border-gray-300'
+                    }`}
                   />
+                  {validationErrors.valuationAmount && (
+                    <p className="mt-1 text-sm text-red-600">{validationErrors.valuationAmount}</p>
+                  )}
                 </div>
 
                 <div>
@@ -486,9 +535,15 @@ export default function IssuerValuationsPage() {
                 <button
                   type="submit"
                   disabled={submitting}
-                  className="bg-[#0B67FF] text-white px-6 py-3 rounded-lg hover:bg-blue-700 font-medium disabled:opacity-50"
+                  className="bg-[#0B67FF] text-white px-6 py-3 rounded-lg hover:bg-blue-700 font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                 >
-                  {submitting ? 'Submitting...' : 'Submit Valuation'}
+                  {submitting && (
+                    <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                  )}
+                  {submitting ? 'Submitting Valuation...' : 'Submit Valuation'}
                 </button>
                 <button
                   type="button"

@@ -9,7 +9,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/client';
 import { verifyToken } from '@/lib/auth/jwt';
 import { FileUploadService } from '@/lib/storage/fileUpload';
+import { valuationSubmitLimiter } from '@/lib/middleware/rateLimit';
+import { EmailService } from '@/lib/email/emailService';
 import crypto from 'crypto';
+
+const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 
 // Helper function to compute file hash
 function computeFileHash(buffer: Buffer): string {
@@ -66,6 +70,21 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Rate limiting check
+    const rateLimitKey = `valuation_submit_${user.id}`;
+    const rateLimitResult = valuationSubmitLimiter(rateLimitKey);
+    
+    if (!rateLimitResult.allowed) {
+      const resetDate = new Date(rateLimitResult.resetTime);
+      return NextResponse.json(
+        { 
+          error: `Rate limit exceeded. You can submit ${5} valuations per day. Try again after ${resetDate.toLocaleString()}`,
+          resetTime: rateLimitResult.resetTime
+        },
+        { status: 429 }
+      );
+    }
+
     // Parse form data
     const formData = await request.formData();
     
@@ -112,6 +131,20 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Check for duplicate valuation in same quarter
+    const { data: duplicateCheck } = await supabaseAdmin
+      .rpc('check_duplicate_valuation', {
+        p_token_id: tokenId,
+        p_valuation_date: valuationDate
+      });
+
+    if (duplicateCheck === true) {
+      return NextResponse.json(
+        { error: 'A valuation for this quarter already exists. Please wait for admin review or submit for next quarter.' },
+        { status: 400 }
+      );
+    }
+
     // Get previous valuation for comparison
     const { data: previousValuation } = await supabaseAdmin
       .from('token_valuations')
@@ -125,6 +158,21 @@ export async function POST(request: NextRequest) {
     // Process uploaded documents
     const valuationReport = formData.get('valuationReport') as File | null;
     const valuationCertificate = formData.get('valuationCertificate') as File | null;
+
+    // Validate file sizes
+    if (valuationReport && valuationReport.size > MAX_FILE_SIZE) {
+      return NextResponse.json(
+        { error: `Valuation report file size exceeds ${MAX_FILE_SIZE / (1024 * 1024)}MB limit` },
+        { status: 400 }
+      );
+    }
+
+    if (valuationCertificate && valuationCertificate.size > MAX_FILE_SIZE) {
+      return NextResponse.json(
+        { error: `Certificate file size exceeds ${MAX_FILE_SIZE / (1024 * 1024)}MB limit` },
+        { status: 400 }
+      );
+    }
 
     let reportUrl = '';
     let reportHash = '';
@@ -257,6 +305,30 @@ export async function POST(request: NextRequest) {
       },
       severity: 'info',
     });
+
+    // Send email notification to admins
+    try {
+      const { data: admins } = await supabaseAdmin
+        .from('users')
+        .select('email, full_name')
+        .eq('role', 'admin');
+
+      if (admins && admins.length > 0) {
+        for (const admin of admins) {
+          await EmailService.sendValuationSubmittedToAdmin(
+            admin.email,
+            tokenData.token_symbol,
+            tokenData.token_name,
+            parseFloat(valuationAmount),
+            user.full_name || user.email,
+            newValuation.id
+          );
+        }
+      }
+    } catch (emailError) {
+      console.error('Email notification error:', emailError);
+      // Don't fail the request if email fails
+    }
 
     // Return success
     return NextResponse.json({

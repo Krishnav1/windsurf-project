@@ -16,6 +16,13 @@ import { Tooltip } from "@/components/ui/Tooltip";
 // Quick action cards for admin
 const ADMIN_QUICK_ACTIONS = [
   {
+    title: 'Valuation Review',
+    description: 'Review and approve quarterly valuations',
+    href: '/admin/valuations',
+    icon: '💰',
+    color: 'bg-emerald-500'
+  },
+  {
     title: 'KYC Verification',
     description: 'Review and verify user KYC documents',
     href: '/admin/kyc',
@@ -297,6 +304,12 @@ export default function AdminDashboardPage() {
             <span className="rounded-full bg-rose-100 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-rose-700">Admin</span>
           </div>
           <div className="flex items-center gap-4 text-sm text-[var(--neutral-500)]">
+            <Link
+              href="/admin/valuations"
+              className="rounded-lg border border-[var(--neutral-200)] px-3 py-1.5 text-[var(--neutral-600)] transition hover:border-[var(--primary-color)] hover:text-[var(--primary-color)]"
+            >
+              Valuations
+            </Link>
             <span>{user?.fullName}</span>
             <button
               onClick={handleLogout}

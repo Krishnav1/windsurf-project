@@ -187,7 +187,7 @@ export class FileUploadService {
   }
   
   /**
-   * Upload issuer document
+   * Upload issuer document (with dual storage: Supabase + Pinata IPFS)
    */
   static async uploadIssuerDocument(
     file: File,
@@ -210,7 +210,9 @@ export class FileUploadService {
     const fileBuffer = Buffer.from(arrayBuffer);
     const fileHash = EncryptionService.generateHash(fileBuffer);
     
-    // Upload to storage and get public URL with error handling
+    console.log(`[Issuer Upload] Step 1: File validated - ${file.name} (${file.size} bytes)`);
+    
+    // STEP 1: Upload to Supabase Storage (primary for fast access)
     let publicUrl: string;
     let filePath: string;
     
@@ -223,11 +225,32 @@ export class FileUploadService {
       );
       publicUrl = uploadResult.publicUrl;
       filePath = uploadResult.filePath;
+      console.log('[Issuer Upload] Step 2: Uploaded to Supabase Storage');
     } catch (uploadError) {
       throw new Error(`File upload failed: ${(uploadError as Error).message}`);
     }
     
-    // Create database record with file_path for easier deletion
+    // STEP 2: Upload to Pinata IPFS (for immutability & compliance)
+    let ipfsHash: string | undefined;
+    let ipfsUrl: string | undefined;
+    
+    try {
+      const ipfsResult = await PinataService.uploadEncryptedDocument(
+        fileBuffer,
+        issuerId,
+        documentType,
+        file.name
+      );
+      ipfsHash = ipfsResult.ipfsHash;
+      ipfsUrl = ipfsResult.ipfsUrl;
+      console.log('[Issuer Upload] Step 3: Uploaded to IPFS:', ipfsHash);
+    } catch (ipfsError) {
+      // Non-critical - Supabase is primary storage
+      logError('IPFS Upload Failed (Issuer)', ipfsError as Error, { issuerId, documentType });
+      console.warn('[Issuer Upload] IPFS upload failed, continuing with Supabase only');
+    }
+    
+    // STEP 3: Create database record with both URLs
     const { data: docRecord, error: dbError } = await supabaseAdmin
       .from('issuer_documents')
       .insert({
@@ -241,6 +264,8 @@ export class FileUploadService {
         file_size: file.size,
         file_type: file.type,
         file_hash: fileHash,
+        ipfs_hash: ipfsHash,
+        ipfs_url: ipfsUrl,
         status: 'pending',
         uploaded_at: new Date().toISOString()
       })
@@ -248,18 +273,23 @@ export class FileUploadService {
       .single();
     
     if (dbError) {
-      // Rollback: Delete uploaded file to prevent orphaned files
+      // Rollback: Delete uploaded files
       try {
         await supabaseAdmin.storage
           .from('issuer-documents')
           .remove([filePath]);
+        if (ipfsHash) {
+          await PinataService.unpinFile(ipfsHash);
+        }
       } catch (cleanupError) {
         logError('File Cleanup Failed', cleanupError as Error, { filePath, issuerId });
       }
       throw new Error(`Database error: ${dbError.message}`);
     }
     
-    // Queue for blockchain storage with retry mechanism (consistent with KYC documents)
+    console.log('[Issuer Upload] Step 4: Database record created:', docRecord.id);
+    
+    // STEP 4: Queue for blockchain storage with retry mechanism
     try {
       await processDocumentWithRetry(
         () => DocumentIntegrityService.processDocument(fileBuffer, docRecord.id, issuerId),
@@ -267,6 +297,7 @@ export class FileUploadService {
         issuerId,
         { maxRetries: 3, initialDelay: 1000 }
       );
+      console.log('[Issuer Upload] Step 5: Blockchain processing queued');
     } catch (error) {
       // Log error but don't fail the upload - document is already in DB
       logError('Blockchain Processing Failed (Issuer)', error as Error, { 
@@ -276,12 +307,16 @@ export class FileUploadService {
       });
     }
     
+    console.log('[Issuer Upload] ✅ Complete - Document stored on Supabase + IPFS');
+    
     return {
       fileUrl: publicUrl,
       fileHash,
       fileName: file.name,
       fileSize: file.size,
-      documentId: docRecord.id
+      documentId: docRecord.id,
+      ipfsHash,
+      ipfsUrl
     };
   }
   

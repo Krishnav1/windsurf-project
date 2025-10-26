@@ -279,6 +279,12 @@ export default function IssuerDashboardPage() {
             </div>
             <div className="flex items-center gap-4 text-sm text-[var(--neutral-500)]">
               <Link
+                href="/issuer/valuations"
+                className="px-4 py-2 text-sm text-[var(--neutral-600)] border border-[var(--neutral-200)] rounded-lg transition hover:border-[var(--primary-color)] hover:text-[var(--primary-color)]"
+              >
+                Valuations
+              </Link>
+              <Link
                 href="/issuer/templates"
                 className="px-4 py-2 text-sm text-[var(--neutral-600)] border border-[var(--neutral-200)] rounded-lg transition hover:border-[var(--primary-color)] hover:text-[var(--primary-color)]"
               >

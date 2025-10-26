@@ -28,6 +28,7 @@
     "razorpay": "^2.9.6",
     "react": "19.1.0",
     "react-dom": "19.1.0",
+    "resend": "^6.2.2",
     "speakeasy": "^2.0.0",
     "uuid": "^13.0.0"
   },
