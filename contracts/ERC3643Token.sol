@@ -59,6 +59,13 @@ contract ERC3643Token is IERC3643 {
     }
     AssetMetadata private _assetMetadata;
     
+    // Price Oracle for IFSCA compliance
+    uint256 private _currentPrice; // Price per token in smallest unit
+    uint256 private _lastPriceUpdate;
+    bytes32 private _latestValuationHash;
+    uint256 private _latestValuationAmount;
+    uint256 private _latestValuationTimestamp;
+    
     // IFSCA/SEBI Compliance: Investor limits
     uint256 private _maxInvestors = 200; // SEBI limit for private placement
     uint256 private _currentInvestorCount;
@@ -72,6 +79,11 @@ contract ERC3643Token is IERC3643 {
     event InvestorRemoved(address indexed investor, uint256 totalInvestors);
     event MaxInvestorsUpdated(uint256 newLimit);
     event MinInvestmentUpdated(uint256 newAmount);
+    
+    // Events for IFSCA compliance - Price and Valuation tracking
+    event PriceUpdated(uint256 indexed oldPrice, uint256 indexed newPrice, uint256 timestamp, string reason);
+    event ValuationUpdated(bytes32 indexed valuationHash, uint256 valuationAmount, uint256 timestamp);
+    event ComplianceStatusChanged(bool indexed isCompliant, string reason, uint256 timestamp);
     
     modifier onlyOwner() {
         require(msg.sender == _owner, "ERC3643: caller is not the owner");
@@ -425,5 +437,66 @@ contract ERC3643Token is IERC3643 {
     function setCompliance(address newCompliance) external onlyOwner {
         _compliance = newCompliance;
         emit ComplianceAdded(newCompliance);
+    }
+    
+    // =====================================================
+    // IFSCA COMPLIANCE: PRICE ORACLE FUNCTIONS
+    // =====================================================
+    
+    /**
+     * @dev Update token price (Admin/Agent only)
+     * Emits PriceUpdated event for transparency
+     */
+    function updatePrice(uint256 newPrice, string memory reason) external onlyAgent {
+        require(newPrice > 0, "ERC3643: price must be greater than zero");
+        uint256 oldPrice = _currentPrice;
+        _currentPrice = newPrice;
+        _lastPriceUpdate = block.timestamp;
+        emit PriceUpdated(oldPrice, newPrice, block.timestamp, reason);
+    }
+    
+    /**
+     * @dev Store valuation hash on-chain for audit trail
+     * Emits ValuationUpdated event
+     */
+    function storeValuationHash(bytes32 valuationHash, uint256 valuationAmount) external onlyAgent {
+        require(valuationAmount > 0, "ERC3643: valuation must be greater than zero");
+        _latestValuationHash = valuationHash;
+        _latestValuationAmount = valuationAmount;
+        _latestValuationTimestamp = block.timestamp;
+        emit ValuationUpdated(valuationHash, valuationAmount, block.timestamp);
+    }
+    
+    /**
+     * @dev Get current token price
+     */
+    function getCurrentPrice() external view returns (uint256) {
+        return _currentPrice;
+    }
+    
+    /**
+     * @dev Get last price update timestamp
+     */
+    function getLastPriceUpdate() external view returns (uint256) {
+        return _lastPriceUpdate;
+    }
+    
+    /**
+     * @dev Get latest valuation information
+     */
+    function getLatestValuation() external view returns (
+        bytes32 valuationHash,
+        uint256 valuationAmount,
+        uint256 timestamp
+    ) {
+        return (_latestValuationHash, _latestValuationAmount, _latestValuationTimestamp);
+    }
+    
+    /**
+     * @dev Update compliance status
+     * Emits ComplianceStatusChanged event
+     */
+    function setComplianceStatus(bool isCompliant, string memory reason) external onlyAgent {
+        emit ComplianceStatusChanged(isCompliant, reason, block.timestamp);
     }
 }

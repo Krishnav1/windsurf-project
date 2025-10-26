@@ -9,6 +9,8 @@
 import { useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import Link from 'next/link';
+import { subscribeToOrderUpdates, subscribeToTransactionUpdates, unsubscribe } from '@/lib/realtime/supabaseRealtime';
+import type { RealtimeChannel } from '@supabase/supabase-js';
 
 export default function TradingPage() {
   const router = useRouter();
@@ -24,6 +26,7 @@ export default function TradingPage() {
   const [price, setPrice] = useState('100');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
+  const [realtimeStatus, setRealtimeStatus] = useState<'connecting' | 'connected' | 'disconnected'>('disconnected');
 
   useEffect(() => {
     const authToken = localStorage.getItem('token');
@@ -34,8 +37,41 @@ export default function TradingPage() {
       return;
     }
 
-    setUser(JSON.parse(userData));
+    const parsedUser = JSON.parse(userData);
+    setUser(parsedUser);
     fetchData(authToken);
+
+    // Subscribe to real-time updates
+    setRealtimeStatus('connecting');
+    const orderChannel = subscribeToOrderUpdates(parsedUser.id, (payload) => {
+      console.log('Order update received:', payload);
+      setRealtimeStatus('connected');
+      
+      if (payload.eventType === 'INSERT') {
+        setOrders(prev => [payload.new, ...prev]);
+      } else if (payload.eventType === 'UPDATE') {
+        setOrders(prev => prev.map(order => 
+          order.id === payload.new.id ? payload.new : order
+        ));
+      } else if (payload.eventType === 'DELETE') {
+        setOrders(prev => prev.filter(order => order.id !== payload.old.id));
+      }
+    });
+
+    const transactionChannel = subscribeToTransactionUpdates(parsedUser.id, (payload) => {
+      console.log('Transaction update received:', payload);
+      // Refresh data when transaction completes
+      if (payload.new?.settlement_status === 'completed') {
+        fetchData(authToken);
+      }
+    });
+
+    // Cleanup on unmount
+    return () => {
+      unsubscribe(orderChannel);
+      unsubscribe(transactionChannel);
+      setRealtimeStatus('disconnected');
+    };
   }, [tokenId]);
 
   const fetchData = async (authToken: string) => {
@@ -150,6 +186,19 @@ export default function TradingPage() {
               </Link>
             </div>
             <div className="flex items-center gap-4">
+              {/* Real-time Status Indicator */}
+              <div className="flex items-center gap-2">
+                <div className={`w-2 h-2 rounded-full ${
+                  realtimeStatus === 'connected' ? 'bg-green-500 animate-pulse' :
+                  realtimeStatus === 'connecting' ? 'bg-yellow-500 animate-pulse' :
+                  'bg-gray-400'
+                }`}></div>
+                <span className="text-xs text-gray-500">
+                  {realtimeStatus === 'connected' ? 'Live' :
+                   realtimeStatus === 'connecting' ? 'Connecting...' :
+                   'Offline'}
+                </span>
+              </div>
               <div className="text-right">
                 <p className="text-xs text-gray-500">Demo Balance</p>
                 <p className="text-sm font-semibold text-gray-900">₹{user?.demoBalance?.toLocaleString()}</p>
@@ -340,15 +389,22 @@ export default function TradingPage() {
                             {new Date(order.created_at).toLocaleString()}
                           </p>
                         </div>
-                        <span className={`px-2 py-1 text-xs rounded ${
-                          order.status === 'filled'
-                            ? 'bg-green-100 text-green-800'
-                            : order.status === 'cancelled'
-                            ? 'bg-gray-100 text-gray-800'
-                            : 'bg-yellow-100 text-yellow-800'
-                        }`}>
-                          {order.status}
-                        </span>
+                        <div className="flex items-center gap-2">
+                          {order.status === 'processing' && (
+                            <div className="w-4 h-4 border-2 border-yellow-500 border-t-transparent rounded-full animate-spin"></div>
+                          )}
+                          <span className={`px-2 py-1 text-xs rounded ${
+                            order.status === 'filled'
+                              ? 'bg-green-100 text-green-800'
+                              : order.status === 'cancelled'
+                              ? 'bg-gray-100 text-gray-800'
+                              : order.status === 'processing'
+                              ? 'bg-blue-100 text-blue-800'
+                              : 'bg-yellow-100 text-yellow-800'
+                          }`}>
+                            {order.status}
+                          </span>
+                        </div>
                       </div>
                     </div>
                   ))}

@@ -6,7 +6,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/client';
 import { verifyToken } from '@/lib/auth/jwt';
-import { CacheService } from '@/lib/cache/redis';
+import { SupabaseCacheService } from '@/lib/cache/supabaseCache';
 
 export async function GET(request: NextRequest) {
   try {
@@ -24,7 +24,7 @@ export async function GET(request: NextRequest) {
 
     // Try cache first
     const cacheKey = `transactions:${decoded.userId}`;
-    const cached = await CacheService.get(cacheKey);
+    const cached = await SupabaseCacheService.get(cacheKey);
     
     if (cached) {
       return NextResponse.json({
@@ -48,7 +48,7 @@ export async function GET(request: NextRequest) {
     }
 
     // Cache for 5 minutes
-    await CacheService.set(cacheKey, transactions, 300);
+    await SupabaseCacheService.set(cacheKey, transactions, 300);
 
     return NextResponse.json({
       success: true,

@@ -38,6 +38,24 @@ const metrics = [
   },
 ];
 
+const testimonials = [
+  {
+    name: "Rajesh Kumar",
+    role: "Real Estate Investor",
+    quote: "Fractional ownership made simple. I can now invest in premium properties with just ₹10,000."
+  },
+  {
+    name: "Priya Sharma",
+    role: "First-time Investor",
+    quote: "The platform is transparent and easy to use. I love seeing my investments grow in real-time."
+  },
+  {
+    name: "Amit Patel",
+    role: "Portfolio Manager",
+    quote: "Finally, a compliant tokenization platform for Indian markets. The IFSCA sandbox approval gives confidence."
+  }
+];
+
 const trustBadges = [
   {
     title: "IFSCA Sandbox",
