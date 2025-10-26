@@ -22,19 +22,19 @@ const heroHighlights = [
 
 const metrics = [
   {
-    label: "Assets tokenized",
-    value: "₹120Cr",
-    description: "Real estate, infrastructure, private credit",
+    label: "Platform Status",
+    value: "Live",
+    description: "Prototype testing environment",
   },
   {
-    label: "Approval turnaround",
-    value: "48hrs",
-    description: "Average sandbox issuance review",
+    label: "Blockchain Network",
+    value: "Polygon",
+    description: "Amoy testnet deployment",
   },
   {
-    label: "Investor retention",
-    value: "98%",
-    description: "Across 6-month pilot programs",
+    label: "Compliance",
+    value: "IFSCA",
+    description: "Sandbox framework compliant",
   },
 ];
 
@@ -60,21 +60,18 @@ const trustLogos = [
   { name: "Alchemy", detail: "High-uptime blockchain infrastructure" },
 ];
 
-const testimonials = [
+const features = [
   {
-    quote: "The investor onboarding journey is the clearest we have seen in a sandbox environment.",
-    name: "Abhijit Shah",
-    role: "Managing Partner, AltInvest Capital",
+    title: "Blockchain Verified",
+    description: "Every transaction recorded on Polygon blockchain with immutable proof",
   },
   {
-    quote: "TokenPlatform gives us regulator-grade evidence bundles without slowing down deployment.",
-    name: "Jigar Shah",
-    role: "Head of Compliance, CrestFin Advisory",
+    title: "Regulatory Compliant",
+    description: "Built following IFSCA sandbox guidelines for tokenized securities",
   },
   {
-    quote: "Investors finally get the transparency they expect from private markets.",
-    name: "Aniruddh Jhaveri",
-    role: "Director, GreenBond Ventures",
+    title: "Secure & Transparent",
+    description: "End-to-end encryption with complete audit trail for all operations",
   },
 ];
 
