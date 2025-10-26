@@ -50,7 +50,7 @@ next-env.d.ts
 
 # Hardhat & Blockchain
 # artifacts/  # COMMENTED OUT - Need ABIs for deployment
-cache/
+/cache/
 typechain-types/
 
 # IDE
